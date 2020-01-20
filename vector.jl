@@ -1,5 +1,5 @@
 module Vector
-export dot, cross, norm
+export dot, cross2d, norm
 
 function cross2d(u::Array, v::Array)::Float64
     return u[1]*v[2] - u[2]*v[1]
