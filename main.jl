@@ -1,7 +1,9 @@
 ##
+include("./vector.jl")
 import Base.show
 using Plots
 using Statistics
+using .Vector
 ##
 mutable struct Vertex
     id::String
@@ -51,27 +53,35 @@ DCEL() = DCEL([], [], [], [])
 
 ##
 function show(io::IO, v::Vertex)::Nothing
-    print(io, "v$(v.id): e=")
-    print(io, isnothing(v.edge) ? "nothing" : "e$(v.edge.id)")
+    print(io, "v$(v.id): e=", printnothing(v.edge))
     print(io, " pos=$(v.pos) orig=$(v.original)\n")
     return
 end
 
+function printnothing(e::Any)::String
+    p = String
+    if typeof(e) == Edge
+        p = "e"
+    elseif typeof(e) == Face
+        p = "f"
+    elseif typeof(e) == Vertex
+        p = "v"
+    end
+    return isnothing(e) ? "nothing" : "$(p)$(e.id)"
+end
+
 function show(io::IO, e::Edge)::Nothing
-    print(io, "e$(e.id): orig=v$(e.orig.id) dest=v$(e.dest.id) cwo=e$(e.cwo.id) ccwo=e$(e.ccwo.id) cwd=e$(e.cwd.id) ccwd=e$(e.ccwd.id)")
-    print(io, ", fr=")
-    print(io, isnothing(e.fr) ? "nothing" : "f$(e.fr.id)")
-    print(io, ", fl=")
-    print(io, isnothing(e.fr) ? "nothing" : "f$(e.fl.id)")
+    print(io, "e$(e.id): orig=v$(e.orig.id) dest=v$(e.dest.id) cwo=e$(e.cwo.id) ccwo=e$(e.ccwo.id) cwd=e$(e.cwd.id)")
+    print(io, "ccwd=", printnothing(e.ccwd))
+    print(io, ", fr=", printnothing(e.fr))
+    print(io, ", fl=", printnothing(e.fl))
     println(io)
     return
 end
 
 function show(io::IO, f::Face)::Nothing
-    print(io, "f$(f.id): e=")
-    print(io, isnothing(f.edge) ? "nothing" : "e$(f.edge.id)")
-    print(io, " site=")
-    print(io, isnothing(f.site) ? "nothing" : "$(f.site)")
+    print(io, "f$(f.id): e=", printnothing(f.edge))
+    print(io, " site=", printnothing(f.site))
     println(io)
     return
 end
@@ -276,8 +286,6 @@ function createface!(D::DCEL)::Face
     push!(D.facelist, new_face)
     return new_face
 end
-
-norm(a::Array)::Float64 = sqrt(sum(a .^2))
 
 distance(p::Array, q::Array)::Float64 = norm(p .-q)
 
@@ -807,6 +815,10 @@ function perpangle(start::Array, finish::Array)::Float64
     return atan(finish[2]-start[2], finish[1]-start[1]) + pi/2
 end
 
+function perpangle(f1::Face, f2::Face)::Float64
+    return perpangle(f1.site, f2.site)
+end
+
 function bisectorangles(u::Array, v::Array, w::Array)
     p = perpangle(v, w)
     q = perpangle(w, u)
@@ -879,9 +891,26 @@ function faceintersection(f::Face)
     end
 end
 
+function edgerayintersection(edge::Edge, q::Array, angle::Float64)::Bool
+    p = edge.orig
+    r = (edge.dest-edge.orig)/norm(edge.dest-edge.orig)
+    s = [cos(angle),sin(angle)]
+    num = q - p
+    den = cross(r, s)
+    t = cross(num, s)/den
+    u = cross(num, r)/den
+    return t>=0 && 0<=u<=1
+end
+
+function edgerayintersection(edge::Edge, start::Array, finish::Array)::Bool
+    angle = atan(finish[2]-start[2], finish[1]-start[1])
+    return edgerayintersection(edge, start, angle)
+end
+
 function mergevoronoi(left::DCEL, right::DCEL)
     high_left, low_left = findextrema(left)
     high_right, low_right = findextrema(right)
+    angle = perpangle(high_right, high_left)
 
 end
 
@@ -937,12 +966,3 @@ checkdcel(b)
 p1 = plotdcel(a)
 p2 = plotdcel(b)
 plot(p1, p2)
-
-fi = mergeinfinitefaces!(a, b)
-high_a, low_a = findextrema(a)
-high_b, low_b = findextrema(b)
-D = joindcel(a, b)
-push!(D.facelist, fi)
-edge = joinvertices!(D, a.vertexlist[2], b.vertexlist[4])
-fi.edge = edge
-edge.fr = edge.fl = fi
