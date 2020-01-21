@@ -10,6 +10,7 @@ mutable struct Vertex
     pos::Array
     edge
     original::Bool
+    dead::Bool
 end
 
 mutable struct Face
@@ -28,6 +29,7 @@ mutable struct Edge
     ccwd::Union{Edge,Nothing}
     fr::Union{Face,Nothing}
     fl::Union{Face,Nothing}
+    dead::Bool
 end
 
 mutable struct DCEL
@@ -38,11 +40,12 @@ mutable struct DCEL
 end
 
 ##
-Vertex(id) = Vertex(id, [NaN, NaN], nothing, true)
-Vertex(id, pos) = Vertex(id, pos, nothing, true)
-Vertex(id, pos, edge) = Vertex(id, pos, edge, true)
+Vertex(id) = Vertex(id, [NaN, NaN], nothing, true, false)
+Vertex(id, pos) = Vertex(id, pos, nothing, true, false)
+Vertex(id, pos, edge) = Vertex(id, pos, edge, true, false)
+Vertex(id, pos, edge, original) = Vertex(id, pos, edge, original, false)
 
-Edge(id, orig, dest) = Edge(id, orig, dest, nothing, nothing, nothing, nothing, nothing, nothing)
+Edge(id, orig, dest) = Edge(id, orig, dest, nothing, nothing, nothing, nothing, nothing, nothing, false)
 
 Face(id) = Face(id, nothing, nothing)
 Face(id, edge) = Face(id, edge, nothing)
@@ -121,10 +124,12 @@ edgeangle(u::Edge)::Float64 = atan(u.dest.pos[2]-u.orig.pos[2], u.dest.pos[1]-u.
 
 pivotangle(u::Edge, p::Vertex)::Float64 = edgeangle(u) + (p==u.orig ? 0 : pi)
 
-function commonvertex(u::Edge, v::Edge, w::Edge)::Vertex
-    out = intersect(endpoints(u), endpoints(v), endpoints(w))
-    @assert !isempty(out) "Given edges have no vertex in common"
-    return pop!(out)
+function commonvertex(u::Edge, edges...)
+    f = endpoints(u)
+    for e in endpoints.(edges)
+        intersect!(f, e)
+    end
+    return isempty(f) ? nothing : pop!(f)
 end
 
 function uncommonvertices(u::Edge, v::Edge, w::Edge)
@@ -324,56 +329,6 @@ edgelength(e::Edge) = norm(mean(endfield(e, :pos)))::Float64
 
 edgecenter(e::Edge) = mean(endfield(e, :pos))::Array
 
-function joinvertices2!(D::DCEL, u::Vertex, v::Vertex; s1::Bool=false,
-    s2::Bool=false, h1::Bool=true, h2::Bool=true, b1::Bool=false,
-    b2::Bool=false)::Edge
-    @assert u != v "Cannot join a vertex to itself"
-    new_edge = createedge!(D, u, v)
-    squeezeedge!(u, new_edge, s1, h1, b1)
-    squeezeedge!(v, new_edge, s2, h2, b2)
-    disconnected = isnothing(u.edge) || isnothing(v.edge)
-    u.edge = v.edge = new_edge
-    if disconnected
-        return new_edge
-    end
-
-    f = new_edge.fr
-    f1 = Face("$(length(D.facelist)+1)", new_edge)
-    current_vertex = new_edge.orig
-    current_edge = ccw(new_edge, current_vertex)
-    while current_edge != new_edge
-        if current_vertex == current_edge.orig
-            current_edge.fr = f1
-            current_vertex = current_edge.dest
-        else
-            current_edge.fl = f1
-            current_vertex = current_edge.orig
-        end
-        current_edge = ccw(current_edge, current_vertex)
-    end
-
-    f2 = Face("$(length(D.facelist)+2)", new_edge)
-    current_vertex = new_edge.dest
-    current_edge = ccw(new_edge, current_vertex)
-    while current_edge != new_edge
-        if current_vertex == current_edge.orig
-            current_edge.fr = f2
-            current_vertex = current_edge.dest
-        else
-            current_edge.fl = f2
-            current_vertex = current_edge.orig
-        end
-        current_edge = ccw(current_edge, current_vertex)
-    end
-
-    new_edge.fl = f1
-    new_edge.fr = f2
-
-    filter!(x->x != f, D.facelist)
-    push!(D.facelist, f1, f2)
-    return new_edge
-end
-
 function joinvertices!(D::DCEL, u::Vertex, v::Vertex; p1::Union{Edge,Nothing}=nothing,
     p2::Union{Edge,Nothing}=nothing)::Edge
     @assert u != v "Cannot join a vertex to itself"
@@ -417,6 +372,10 @@ function joinvertices!(D::DCEL, u::Vertex, v::Vertex; p1::Union{Edge,Nothing}=no
 
     new_edge.fl = f1
     new_edge.fr = f2
+
+    if !isnothing(f.site)
+        leftofedge(new_edge, f.site) ? new_edge.fl.site = f.site : new_edge.fr.site = f.site
+    end
 
     filter!(x->x != f, D.facelist)
     push!(D.facelist, f1, f2)
@@ -777,6 +736,8 @@ split = add_join_vertex!(D, [0,5])
 splitedge!(D, D.edgelist[9], split)
 addray!(D, D.vertexlist[17], pi/2)
 deleteedge!(D, D.edgelist[6])
+D.facelist[13].site = [0.5,4]
+joinvertices!(D, D.vertexlist[6], D.vertexlist[3])
 
 fixids!(D)
 checkdcel(D)
@@ -969,31 +930,92 @@ function mergevoronoi(left::DCEL, right::DCEL)
     el, il = facerayintersection(hl, midpoint(hr, hl), angle)
     er, ir = facerayintersection(hr, midpoint(hr, hl), angle)
     split = Vertex
-    right_first = Bool
+    starter_right = Bool
     if ir[2] > il[2]
-        right_first = true
+        starter_right = true
         split = createvertex!(D, ir)
         s1, s2 = splitedge!(D, er, split)
     else
-        right_first = false
+        starter_right = false
         split = createvertex!(D, il)
         s1, s2 = splitedge!(D, el, split)
     end
     ray = addray!(D, split, angle+pi)
-    if right_first
-        edge = s1.cwo == ray ? s1 : s2
-        return edge
+    current_right = current_left = Face
+    if starter_right
+        starter_edge = cw(s1,split) == ray ? s1 : s2
+        edge = starter_edge
         while true
             next = cwface(ray.fl, edge)
-            deleteedge!(D, edge)
-            print("DELETED")
+            # deleteedge!(D, edge)
+            edge.dead = true
             if isboundaryedge(edge)
                 break
             end
+            commonvertex(edge, next).dead = true
             edge = next
         end
+        current_right = oppositeface(ray.fl, starter_edge)
+        current_left = hl
+        current_vertex = split
+        ray.fl = hl
+        ray.fr = hr
+    end
+
+    while true
+        angle = perpangle(current_right, current_left)
+        el, il = facerayintersection(current_left, current_vertex.pos, angle)
+        er, ir = facerayintersection(current_left, current_vertex.pos, angle)
+        current_edge = Edge
+        current_split = Vertex
+        right_first = Bool
+        if ir[2] > il[2]
+            right_first = true
+            current_split = createvertex!(D, ir)
+            current_edge = er
+        else
+            right_first = false
+            current_split = createvertex!(D, il)
+            current_edge = el
+        end
+        s1, s2 = splitedge!(D, split_edge, current_split)
+        joint = joinvertices!(D, current_vertex, current_split)
+        if right_first
+            edge = cw(s1,split) == joint ? s1 : s2
+            while true
+                edge.dead = true
+                if split in endpoints(edge)
+                    break
+                end
+                edge = cwface(strut.fl, edge)
+            end
+        else
+            edge = ccw(s1,split) == joint ? s1 : s2
+            while true
+                edge.dead = true
+
+                if split in endpoints(edge)
+                    break
+                end
+                edge = ccwface(strut.fr, edge)
+            end
+        end
+        joint.fr = current_left
+        joint.fl = current_right
+
     end
     return D
+end
+
+function oppositeface(f::Face, e::Edge)::Face
+    if e.fr == f
+        return e.fl
+    elseif e.fl == f
+        return e.fr
+    else
+        throw("Face $(f) has a topology problem")
+    end
+    return
 end
 
 global vor_sorted = false
@@ -1046,4 +1068,4 @@ fixids!(b)
 checkdcel(a)
 checkdcel(b)
 test = mergevoronoi(a, b)
-# checkdcel(test)
+checkdcel(test)
