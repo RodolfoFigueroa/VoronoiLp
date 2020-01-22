@@ -2,7 +2,7 @@ module DStruct
 include("./vector.jl")
 import Base.show
 using Plots, Statistics, .DVector
-export Vertex, Face, Edge, DCEL, show, createvertex!, createedge!, createface!, createdummyvertex!, fixids!, checkdcel, plotdcel, cw, ccw, cwset!, ccwset!, add_join_vertex!, joinvertices!, addray!, splitedge!, deleteedge!, endpoints, midpoint, isboundaryedge, isstrutedge, cwface, ccwface, commonvertex
+export Vertex, Face, Edge, DCEL, show, createvertex!, createedge!, createface!, createdummyvertex!, fixids!, checkdcel, plotdcel, cw, ccw, cwset!, ccwset!, add_join_vertex!, joinvertices!, addray!, splitedge!, deleteedge!, endpoints, midpoint, isboundaryedge, isstrutedge, cwface, ccwface, commonvertex, resetfacelist!
 
 mutable struct Vertex
     id::String
@@ -60,7 +60,7 @@ end
 
 function show(io::IO, v::Vertex)::Nothing
     print(io, "v$(v.id): e=", printnothing(v.edge))
-    print(io, " pos=$(v.pos) orig=$(v.original)\n")
+    print(io, " pos=$(v.pos) orig=$(v.original)")
     return
 end
 
@@ -72,30 +72,30 @@ function show(io::IO, e::Edge)::Nothing
     print(io, " ccwd=", printnothing(e.ccwd))
     print(io, " fr=", printnothing(e.fr))
     print(io, " fl=", printnothing(e.fl))
-    println(io)
     return
 end
 
 function show(io::IO, f::Face)::Nothing
     print(io, "f$(f.id): e=", printnothing(f.edge))
     print(io, " site=", isnothing(f.site) ? "nothing" : f.site)
-    println(io)
     return
 end
 
 function show(io::IO, D::DCEL)::Nothing
     for v in D.vertexlist
         show(io, v)
+        println(io)
     end
     println(io)
     for e in D.edgelist
         show(io, e)
+        println(io)
     end
     println(io)
     for f in D.facelist
         show(io, f)
+        println(io)
     end
-    println(io)
     return
 end
 
@@ -145,7 +145,11 @@ function plotdcel(D::DCEL, radius::Number=1, faces::Bool=false)
         scatter!(p, [v.pos[1]], [v.pos[2]], series_annotations=[Plots.text("\nv$(v.id)"), :bottom], color=color)
     end
     for e in D.edgelist
-        color = !e.orig.original && !e.dest.original ? :red : :black
+        if e.dead
+            color = :gray
+        else
+            color = isboundaryedge(e) ? :red : :black
+        end
         ave = edgecenter(e)
         plot!(p, [e.orig.pos[1],e.dest.pos[1]], [e.orig.pos[2],e.dest.pos[2]], line=:arrow, annotations = (ave[1], ave[2], "e$(e.id)"), linecolor=color)
     end
@@ -417,7 +421,7 @@ function ccwface(f::Face, edge::Union{Edge,Nothing}=nothing)::Edge
     elseif f == edge.fl
         return edge.cwd
     else
-        throw("$(f) has a topology problem")
+        throw("Looking for $(f) in $(edge.fl) and $(edge.fr)")
     end
     return
 end
