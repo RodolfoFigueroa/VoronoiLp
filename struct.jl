@@ -2,7 +2,7 @@ module DStruct
 include("./vector.jl")
 import Base.show
 using Plots, Statistics, .DVector
-export Vertex, Face, Edge, DCEL, show, createvertex!, createedge!, createface!, createdummyvertex!, fixids!, checkdcel, plotdcel, cw, ccw, cwset!, ccwset!, add_join_vertex!, joinvertices!, addray!, splitedge!, deleteedge!, endpoints, midpoint, isboundaryedge, isstrutedge, cwface, ccwface, commonvertex, resetfacelist!
+export Vertex, Face, Edge, DCEL, show, createvertex!, createedge!, createface!, createdummyvertex!, fixids!, checkdcel, plotdcel, cw, ccw, cwset!, ccwset!, add_join_vertex!, joinvertices!, addray!, splitedge!, deleteedge!, endpoints, midpoint, isboundaryedge, isstrutedge, cwface, ccwface, commonvertex, resetfacelist!, leftofedge
 
 mutable struct Vertex
     id::String
@@ -648,24 +648,7 @@ function leftofedge(e::Edge, pos::Array)::Bool
     return cosatan(y,x)*(pos[2]-e.orig.pos[2])-sinatan(y,x)*(pos[1]-e.orig.pos[1]) > 0
 end
 
-function cosatan(y::Number, x::Number)::Float64
-    return x/hypot(x,y)
-end
-
-function sinatan(y::Number, x::Number)::Float64
-    if x==0
-        if y>0
-            return 1
-        elseif y<0
-            return -1
-        else
-            return 0
-        end
-    else
-        return y/hypot(x,y)
-    end
-    return
-end
+leftofedge(e::Edge, v::Vertex)::Bool = leftofedge(e, v.pos)
 
 function midpoint(f1::Face, f2::Face)::Array
     return mean([f1.site, f2.site])
