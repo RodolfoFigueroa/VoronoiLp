@@ -1,4 +1,5 @@
 module DVoronoi
+using Statistics
 
 function circletwopointsradius(p::Array, q::Array, r::Number)
     x1, y1 = p
@@ -22,9 +23,6 @@ function circlethreepoints(p::Array, q::Array, r::Array)
     return [x/den,y/den]
 end
 
-function midpoints(u::Array, v::Array, w::Array)::Tuple 
-	return mean([u,v]), mean([v,w]), mean([w,u])
-end
 
 
 end

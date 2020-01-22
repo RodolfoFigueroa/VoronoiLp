@@ -1,8 +1,8 @@
 module DStruct
 include("./vector.jl")
 import Base.show
-using Plots, .DVector
-export Vertex, Face, Edge, DCEL, show, createvertex!, createedge!, createface!, fixids!, checkdcel, plotdcel, cw, ccw, cwset!, ccwset!, add_join_vertex!, joinvertices!, addray!, splitedge!, deleteedge!
+using Plots, Statistics, .DVector
+export Vertex, Face, Edge, DCEL, show, createvertex!, createedge!, createface!, createdummyvertex!, fixids!, checkdcel, plotdcel, cw, ccw, cwset!, ccwset!, add_join_vertex!, joinvertices!, addray!, splitedge!, deleteedge!, endpoints, midpoint, isboundaryedge, isstrutedge, cwface, ccwface, commonvertex
 
 mutable struct Vertex
     id::String
@@ -166,6 +166,9 @@ function checkdcel(D::DCEL)
         @assert cw(ccw(e,e.dest),e.dest) == e "3 $(e)"
         @assert ccw(cw(e,e.dest),e.dest) == e "4 $(e)"
         @assert e.orig != e.dest
+        if isstrutedge(e)
+            @assert e.orig.original && !e.dest.original
+        end
     end
 
     pos_list = getfield.(D.vertexlist, :pos)
@@ -269,22 +272,16 @@ function normalizedummy(v::Vertex)::Array
     return v.pos - u.pos
 end
 
-function pointccw(array::Array)::Bool
-    sum = 0
-    for i in 2:length(array)
-        sum += (array[i][1] - array[i-1][1])*(array[i][2] + array[i-1][2])
-    end
-    sum += (array[1][1] - array[end][1])*(array[1][2] + array[end][2])
-    return sum <= 0
-end
-
 vertexccw(vertices::Array) = pointccw(getfield.(vertices, :pos))
 
-angleccw(a::Number, b::Number, c::Number)::Bool = sin(a-b) - sin(a-c) + sin(b-c) <= 0
+function isboundaryedge(e::Edge)::Bool
+    return all(.!endfield(e, :original))
+end
 
-isboundaryedge(e::Edge)::Bool = all(.!endfield(e, :original))
-
-isstrutedge(e::Edge)::Bool = any(.!endfield(e, :original))
+function isstrutedge(e::Edge)::Bool
+    a = endfield(e, :original)
+    return xor(a[1], a[2])
+end
 
 function squeezeedge!(v::Vertex, e::Edge, previous::Union{Edge,Nothing}=nothing)::Nothing
     @assert v in endpoints(e)
@@ -344,8 +341,7 @@ edgelength(e::Edge) = norm(mean(endfield(e, :pos)))::Float64
 
 edgecenter(e::Edge) = mean(endfield(e, :pos))::Array
 
-function joinvertices!(D::DCEL, u::Vertex, v::Vertex; p1::Union{Edge,Nothing}=nothing,
-    p2::Union{Edge,Nothing}=nothing)::Edge
+function joinvertices!(D::DCEL, u::Vertex, v::Vertex; p1::Union{Edge,Nothing}=nothing, p2::Union{Edge,Nothing}=nothing)::Edge
     @assert u != v "Cannot join a vertex to itself"
     new_edge = createedge!(D, u, v)
     squeezeedge!(u, new_edge, p1)
@@ -388,7 +384,7 @@ function joinvertices!(D::DCEL, u::Vertex, v::Vertex; p1::Union{Edge,Nothing}=no
     new_edge.fl = f1
     new_edge.fr = f2
 
-    if !isnothing(f.site)
+    if !isnothing(f) && !isnothing(f.site)
         leftofedge(new_edge, f.site) ? new_edge.fl.site = f.site : new_edge.fr.site = f.site
     end
 
@@ -627,6 +623,10 @@ function splitedge!(D::DCEL, e::Edge, split::Vertex)
     split.edge = new_edge
     cwset!(e.ccwd, e.dest, new_edge)
     ccwset!(e.cwd, e.dest, new_edge)
+    if isstrutedge(e)
+        x, y = e.dest.pos - e.orig.pos
+        new_edge.dest.pos = split.pos + [cosatan(y,x), sinatan(y,x)]
+    end
 
     e.id = "$(e.id)a"
     e.dest.edge = new_edge
@@ -662,5 +662,10 @@ function sinatan(y::Number, x::Number)::Float64
     end
     return
 end
+
+function midpoint(f1::Face, f2::Face)::Array
+    return mean([f1.site, f2.site])
+end
+
 
 end

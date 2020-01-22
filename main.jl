@@ -3,45 +3,45 @@ include("./vector.jl")
 include("./struct.jl")
 using .DVector
 using .DStruct
-
+using Plots
+using Statistics
 ##
-D = DCEL();
-add_join_vertex!(D, [0,0])
-add_join_vertex!(D, [1,1], D.vertexlist[1])
-add_join_vertex!(D, [1,2], D.vertexlist[2])
-add_join_vertex!(D, [3,4], D.vertexlist[2])
-add_join_vertex!(D, [1,4], D.vertexlist[3])
-add_join_vertex!(D, [0,2], D.vertexlist[1])
-joinvertices!(D, D.vertexlist[6], D.vertexlist[3])
-joinvertices!(D, D.vertexlist[5], D.vertexlist[4])
-joinvertices!(D, D.vertexlist[1], D.vertexlist[3])
-joinvertices!(D, D.vertexlist[5], D.vertexlist[6])
-add_join_vertex!(D, [2,1], D.vertexlist[2])
-joinvertices!(D, D.vertexlist[1], D.vertexlist[7])
-addray!(D, D.vertexlist[4], pi/4)
-addray!(D, D.vertexlist[5], pi/2)
-test = add_join_vertex!(D, [2,4])
-splitedge!(D, D.edgelist[7], test)
-addray!(D, D.vertexlist[6], 3*pi/4)
-test = add_join_vertex!(D, [1,0.5])
-splitedge!(D, D.edgelist[11], test)
-addray!(D, D.vertexlist[1], -pi/2)
-addray!(D, D.vertexlist[7], -pi/2)
-addray!(D, D.vertexlist[7], 0)
-addray!(D, D.vertexlist[2], pi/8)
-split = add_join_vertex!(D, [0,5])
-splitedge!(D, D.edgelist[9], split)
-addray!(D, D.vertexlist[17], pi/2)
-deleteedge!(D, D.edgelist[6])
-D.facelist[13].site = [0.5,4]
-joinvertices!(D, D.vertexlist[6], D.vertexlist[3])
-
-fixids!(D)
-checkdcel(D)
-plotdcel(D, 1, true)
-
+# D = DCEL();
+# add_join_vertex!(D, [0,0])
+# add_join_vertex!(D, [1,1], D.vertexlist[1])
+# add_join_vertex!(D, [1,2], D.vertexlist[2])
+# add_join_vertex!(D, [3,4], D.vertexlist[2])
+# add_join_vertex!(D, [1,4], D.vertexlist[3])
+# add_join_vertex!(D, [0,2], D.vertexlist[1])
+# joinvertices!(D, D.vertexlist[6], D.vertexlist[3])
+# joinvertices!(D, D.vertexlist[5], D.vertexlist[4])
+# joinvertices!(D, D.vertexlist[1], D.vertexlist[3])
+# joinvertices!(D, D.vertexlist[5], D.vertexlist[6])
+# add_join_vertex!(D, [2,1], D.vertexlist[2])
+# joinvertices!(D, D.vertexlist[1], D.vertexlist[7])
+# addray!(D, D.vertexlist[4], pi/4)
+# addray!(D, D.vertexlist[5], pi/2)
+# test = add_join_vertex!(D, [2,4])
+# splitedge!(D, D.edgelist[7], test)
+# addray!(D, D.vertexlist[6], 3*pi/4)
+# test = add_join_vertex!(D, [1,0.5])
+# splitedge!(D, D.edgelist[11], test)
+# addray!(D, D.vertexlist[1], -pi/2)
+# addray!(D, D.vertexlist[7], -pi/2)
+# addray!(D, D.vertexlist[7], 0)
+# addray!(D, D.vertexlist[2], pi/8)
+# split = add_join_vertex!(D, [0,5])
+# splitedge!(D, D.edgelist[9], split)
+# addray!(D, D.vertexlist[17], pi/2)
+# deleteedge!(D, D.edgelist[6])
+# D.facelist[13].site = [0.5,4]
+# joinvertices!(D, D.vertexlist[6], D.vertexlist[3])
+#
+# fixids!(D)
+# checkdcel(D)
+# test = plotdcel(D, 1, false)
+# plot(test)
 ##
-
 
 leftofedge(e::Edge, v::Vertex)::Bool = leftofedge(e, v.pos)
 
@@ -77,17 +77,17 @@ function voronoithreepoints(points::Array)::DCEL
     m = createvertex!(D, circlethreepoints(u, v, w))
     p = addray!(D, m, a)
     r = addray!(D, m, c)
+    # return D
     outeredge = angleccw(a,b,c) ? p.cwd : r.cwd
     dummy = createdummyvertex!(D, m, b)
     s1, s2 = splitedge!(D, outeredge, dummy)
     joinvertices!(D, m, dummy, p2=s2)
     p.fl.site = v
-    p.fr.site = u
-    p.ccwo.fl.site = w
+    p.fr.site = w
+    p.ccwo.fl.site = u
     return D
 end
 
-##
 function findextrema(D::DCEL)
     positions = getfield.(D.facelist, :site)
     out = [-Inf, -Inf]
@@ -124,26 +124,6 @@ function faceintersection(f::Face)
         end
     end
 end
-
-function cosatan(y::Number, x::Number)::Float64
-    return x/hypot(x,y)
-end
-
-function sinatan(y::Number, x::Number)::Float64
-    if x==0
-        if y>0
-            return 1
-        elseif y<0
-            return -1
-        else
-            return 0
-        end
-    else
-        return y/hypot(x,y)
-    end
-    return
-end
-
 
 function edgerayintersection(edge::Edge, q::Array, angle::Float64)::Array
     p = edge.orig.pos
@@ -186,31 +166,59 @@ function facerayintersection(f::Face, start::Array, angle::Number, starter_edge:
     return
 end
 
-midpoint(f1::Face, f2::Face)::Array = mean([f1.site, f2.site])
-
+function oppositeface(f::Face, e::Edge)::Face
+    println("CHECKING OPPOSITE FACE OF: ")
+    show(f)
+    println("WITH MIRROR EDGE: $(e.orig.pos), $(e.dest.pos)")
+    println("MIRROR FACE RIGHT: $(e.fr)")
+    println("MIRROR FACE LEFT: $(e.fl)")
+    if e.fr.site == f.site
+        println("FOUND OPPOSITE: ")
+        show(e.fl)
+        return e.fl
+    elseif e.fl.site == f.site
+        println("FOUND OPPOSITE: ")
+        show(e.fr)
+        return e.fr
+    else
+        throw("Face $(f) has a topology problem")
+    end
+    return
+end
 
 function mergevoronoi(left::DCEL, right::DCEL)
     D = joindcel(left, right)
     hl, ll = findextrema(left)
     hr, lr = findextrema(right)
     angle = perpangle(hr, hl)
+    println("INITIAL RAY HAS AN ANGLE: $(rad2deg(angle))")
     el, il = facerayintersection(hl, midpoint(hr, hl), angle)
     er, ir = facerayintersection(hr, midpoint(hr, hl), angle)
     split = Vertex
     starter_right = Bool
     if ir[2] > il[2]
+        println("INTERSECTED RIGHT DIAGRAM FIRST AT $(ir)")
         starter_right = true
         split = createvertex!(D, ir)
         s1, s2 = splitedge!(D, er, split)
     else
+        println("INTERSECTED LEFT DIAGRAM FIRST AT $(il)")
         starter_right = false
         split = createvertex!(D, il)
         s1, s2 = splitedge!(D, el, split)
     end
-    ray = addray!(D, split, angle+pi)
-    current_right = current_left = Face
+    current_right = Face
+    current_left = Face
+    ray = Edge
     if starter_right
-        starter_edge = cw(s1,split) == ray ? s1 : s2
+        ray = addray!(D, split, angle+pi, hr)
+        println("RAY HAS AN ORIGIN $(ray.orig.pos)")
+        println("RAY CWO: $(ray.cwo.orig.pos), $(ray.cwo.dest.pos)")
+        println("RAY CCWO: $(ray.ccwo.orig.pos), $(ray.ccwo.dest.pos)")
+        println("RAY FACE RIGHT: $(ray.fr)")
+        println("RAY FACE LEFT: $(ray.fl)")
+        # starter_edge = cw(s1,split) == ray ? s1 : s2
+        starter_edge = ccw(ray, split)
         edge = starter_edge
         while true
             next = cwface(ray.fl, edge)
@@ -228,24 +236,31 @@ function mergevoronoi(left::DCEL, right::DCEL)
         ray.fl = hl
         ray.fr = hr
     end
-
     while true
+        if current_left == ll && current_right == lr
+            return
+        end
         angle = perpangle(current_right, current_left)
+        println("NEXT BISECTOR HAS AN ANGLE: $(rad2deg(angle))")
         el, il = facerayintersection(current_left, current_vertex.pos, angle)
         er, ir = facerayintersection(current_left, current_vertex.pos, angle)
         current_edge = Edge
         current_split = Vertex
         right_first = Bool
         if ir[2] > il[2]
+            println("BISECTOR INTERSECTED RIGHT EDGE: $(er.orig.pos) $(er.dest.pos)")
+            println("AT: $(ir)")
             right_first = true
             current_split = createvertex!(D, ir)
             current_edge = er
         else
+            println("BISECTOR INTERSECTED LEFT EDGE $(el.orig.pos) $(el.dest.pos)")
+            println("AT: $(il)")
             right_first = false
             current_split = createvertex!(D, il)
             current_edge = el
         end
-        s1, s2 = splitedge!(D, split_edge, current_split)
+        s1, s2 = splitedge!(D, current_edge, current_split)
         joint = joinvertices!(D, current_vertex, current_split)
         if right_first
             edge = cw(s1,split) == joint ? s1 : s2
@@ -254,36 +269,34 @@ function mergevoronoi(left::DCEL, right::DCEL)
                 if split in endpoints(edge)
                     break
                 end
-                edge = cwface(strut.fl, edge)
+                edge = cwface(joint.fl, edge)
             end
         else
             edge = ccw(s1,split) == joint ? s1 : s2
             while true
                 edge.dead = true
-
                 if split in endpoints(edge)
                     break
                 end
-                edge = ccwface(strut.fr, edge)
+                edge = ccwface(joint.fr, edge)
             end
         end
+
         joint.fr = current_left
         joint.fl = current_right
+        current_left.edge = joint
+        current_right.edge = joint
+
+        if right_first
+            current_right = oppositeface(current_right, current_edge)
+        else
+            current_left = oppositeface(current_left, current_edge)
+        end
 
     end
     return D
 end
 
-function oppositeface(f::Face, e::Edge)::Face
-    if e.fr == f
-        return e.fl
-    elseif e.fl == f
-        return e.fr
-    else
-        throw("Face $(f) has a topology problem")
-    end
-    return
-end
 
 global vor_sorted = false
 function voronoi(start_points::Array)
@@ -309,7 +322,6 @@ function voronoi(start_points::Array)
     return
 end
 
-##
 function mergeinfinitefaces!(a::DCEL, b::DCEL)
     fi = Face("i")
     resetfacelist!(a, fi)
@@ -325,6 +337,28 @@ function joindcel(a::DCEL, b::DCEL)::DCEL
     return DCEL(edgelist, vertexlist, facelist, dummylist)
 end
 
+function circletwopointsradius(p::Array, q::Array, r::Number)
+    x1, y1 = p
+    x2, y2 = q
+    q = sqrt((x2-x1)^2 + (y2-y1)^2)
+    y3 = (y1+y2)/2
+    x3 = (x1+x2)/2
+    basex = sqrt(r^2 - (q/2)^2) * (y1-y2)/q
+    basey = sqrt(r^2 - (q/2)^2) * (x2-x1)/q
+
+    return [x3+basex, y3+basey], [x3-basex, y3-basey]
+end
+
+function circlethreepoints(p::Array, q::Array, r::Array)
+    x1,y1 = p
+    x2,y2 = q
+    x3,y3 = r
+    den = 2*(x1*(y3-y2)+x2*(y1-y3)+x3*(y2-y1))
+    x = (x1^2+y1^2)*(y3-y2)+(x2^2+y2^2)*(y1-y3)+(x3^2+y3^2)*(y2-y1)
+    y = (x1^2+y1^2)*(x2-x3)+(x2^2+y2^2)*(x3-x1)+(x3^2+y3^2)*(x1-x2)
+    return [x/den,y/den]
+end
+
 ##
 p = [[2,2],[1,1],[3,5]]
 q = [[3,3],[5,4],[6,2]]
@@ -335,4 +369,4 @@ fixids!(b)
 checkdcel(a)
 checkdcel(b)
 test = mergevoronoi(a, b)
-checkdcel(test)
+# checkdcel(test)
