@@ -88,43 +88,48 @@ function edgerayintersection(edge::Edge, q::Array, angle::Float64)::Array
     t = cross2d(num, s)/den
     u = cross2d(num, r)/den
     if isstrutedge(edge)
-        return u>=0 && t>=0 ? p+t*r : [NaN,NaN]
+        return u>=0 && 0<=t #=&& cross2d(p-q, r) != 0=# ? p+t*r : [NaN,NaN]
     else
-        return u>=0 && 0<=t<=1 ? p+t*r : [NaN,NaN]
+        return u>=0 && 0<=t<=1 ? p+t*r #=&& cross2d(p-q, r) != 0=# : [NaN,NaN]
     end
     return
 end
 
-function edgerayintersection(edge::Edge, start::Array, finish::Array)::Array
-    p = edge.orig.pos
-    r = (edge.dest.pos-p)/norm(edge.dest.pos-p)
-    s = [cosatan(finish[2]-start[2],finish[1]-start[1]),sinatan(finish[2]-start[2],finish[1]-start[1])]
-    num = start - p
-    den = cross2d(r, s)
-    t = cross2d(num, s)/den
-    u = cross2d(num, r)/den
-    return u>=0 && 0<=t<=1 ? p+t*r : [NaN,NaN]
-end
+# function edgerayintersection(edge::Edge, start::Array, finish::Array)::Array
+#     p = edge.orig.pos
+#     r = (edge.dest.pos-p)/norm(edge.dest.pos-p)
+#     s = [cosatan(finish[2]-start[2],finish[1]-start[1]),sinatan(finish[2]-start[2],finish[1]-start[1])]
+#     num = start - p
+#     den = cross2d(r, s)
+#     t = cross2d(num, s)/den
+#     u = cross2d(num, r)/den
+#     return u>=0 && 0<=t<=1 ? p+t*r : [NaN,NaN]
+# end
 
-function facerayintersection(f::Face, start::Array, angle::Number, clockwise::Bool, starter_edge::Union{Edge,Nothing}=nothing)
-    edge = isnothing(starter_edge) ? f.edge : starter_edge
-    println("CHECKING INTERSECTION OF FACE $(f)")
+function facerayintersection(f::Face, start::Array, angle::Number, clockwise::Bool, ignore::Array=[])
+    starter_edge = f.edge
+    edge = starter_edge
+    println("\nCHECKING INTERSECTION OF FACE $(f)")
     while true
-        println("CHECKING EDGE ($(edge.orig.pos), $(edge.dest.pos))")
-        if !isboundaryedge(edge)
+        # sleep(0.1)
+        println("\nCHECKING EDGE ($(edge.orig.pos), $(edge.dest.pos))")
+        println("WITH LEFT FACE: $(edge.fl) AND RIGHT FACE: $(edge.fr)")
+        if !isboundaryedge(edge) && !(edge in ignore)
             inter = edgerayintersection(edge, start, angle)
-            if (!isnan(inter[1])) && (isnothing(starter_edge) || edge != starter_edge)
+            if !isnan(inter[1])
                 return edge, inter
             end
         end
         edge = clockwise ? cwface(f,edge) : ccwface(f,edge)
+        if edge == starter_edge
+            return nothing, [-Inf,-Inf]
+        end
     end
     return
 end
 
 function oppositeface(f::Face, e::Edge)::Face
-    println("CHECKING OPPOSITE FACE OF: ")
-    show(f)
+    println("CHECKING OPPOSITE FACE OF: $(f)")
     println("\nWITH MIRROR EDGE: $(e.orig.pos), $(e.dest.pos)")
     println("MIRROR RIGHT FACE: $(e.fr)")
     println("MIRROR LEFT FACE: $(e.fl)")
@@ -142,6 +147,8 @@ function oppositeface(f::Face, e::Edge)::Face
     return
 end
 
+#When I wrote this, only God and I understood what was going on.
+#Now, only God knows.
 function mergevoronoi(left::DCEL, right::DCEL)
     fi = mergeinfinitefaces!(left, right)
     D = joindcel(left, right)
@@ -154,6 +161,7 @@ function mergevoronoi(left::DCEL, right::DCEL)
     er, ir = facerayintersection(hr, midpoint(hr, hl), angle, true)
     split = Vertex
     starter_right = Bool
+    s1 = s2 = Edge
     if ir[2] > il[2]
         println("INTERSECTED RIGHT DIAGRAM FIRST AT $(ir)")
         starter_right = true
@@ -167,59 +175,66 @@ function mergevoronoi(left::DCEL, right::DCEL)
     end
     current_right_face = current_left_face = Face
     current_right_vertex = current_left_vertex = nothing
-    ray = Edge
+    upper_ray = Edge
     if starter_right
-        ray = addray!(D, split, angle+pi, hr)
+        upper_ray = addray!(D, split, angle+pi, hr)
         println("RAY HAS AN ORIGIN $(ray.orig.pos)")
-        println("RAY CWO: $(ray.cwo.orig.pos), $(ray.cwo.dest.pos)")
-        println("RAY CCWO: $(ray.ccwo.orig.pos), $(ray.ccwo.dest.pos)")
-        println("RAY FACE RIGHT: $(ray.fr)")
-        println("RAY FACE LEFT: $(ray.fl)")
-        starter_edge = ccw(ray, split)
+        starter_edge = ccw(upper_ray, split)
         edge = starter_edge
         while true
-            next = cwface(ray.fl, edge)
+            next = cwface(upper_ray.fl, edge)
             edge.dead = true
+            println("KILLED: ($(edge.orig.pos), $(edge.dest.pos))")
             if isboundaryedge(edge)
                 break
             end
             commonvertex(edge, next).dead = true
             edge = next
         end
-        current_right_face = oppositeface(ray.fl, starter_edge)
+        current_right_face = oppositeface(upper_ray.fl, starter_edge)
         current_left_face = hl
         current_vertex = split
-        ray.fl = hl
-        ray.fr = hr
+        upper_ray.fl = hl
+        upper_ray.fr = hr
         current_right_vertex = current_vertex
+        welded = false
     end
-    return D
     while true
         if current_left_face == ll && current_right_face == lr
-            return
+            return D
         end
         angle = perpangle(current_right_face, current_left_face)
-        println("\n\nNEXT BISECTOR HAS AN ANGLE: $(rad2deg(angle)) AND STARTS AT: $(current_vertex.pos)")
-        el, il = facerayintersection(current_left_face, current_vertex.pos, angle, false)
-        er, ir = facerayintersection(current_right_face, current_vertex.pos, angle, true)
+        println("\n\n==NEXT BISECTOR HAS AN ANGLE: $(rad2deg(angle)) AND STARTS AT: $(current_vertex.pos)==")
+        er, ir = facerayintersection(current_right_face, current_vertex.pos, angle, true, [s1,s2])
+        if !isnothing(er)
+            println("\n=BISECTOR INTERSECTED RIGHT EDGE: ($(er.orig.pos), $(er.dest.pos) AT: $(ir)=")
+        end
+        el, il = facerayintersection(current_left_face, current_vertex.pos, angle, false, [s1,s2])
+        if !isnothing(el)
+            println("\n=BISECTOR INTERSECTED LEFT EDGE ($(el.orig.pos), $(el.dest.pos) AT: $(il)=")
+        end
         current_edge = Edge
         current_split = Vertex
         right_first = Bool
         if ir[2] > il[2]
-            println("BISECTOR INTERSECTED RIGHT EDGE: ($(er.orig.pos), $(er.dest.pos))")
-            println("AT: $(ir)")
+            println("\n+CHOSE RIGHT INTERSECTION+\n")
             right_first = true
             current_split = createvertex!(D, ir)
             current_edge = er
-        else
-            println("BISECTOR INTERSECTED LEFT EDGE ($(el.orig.pos), $(el.dest.pos))")
-            println("AT: $(il)")
+        elseif il[2] > ir[2]
+            println("\n+CHOSE LEFT INTERSECTION+\n")
             right_first = false
             current_split = createvertex!(D, il)
             current_edge = el
+        else
+            throw("")
         end
+        println("SPLITTING: ($(current_edge.orig.pos), $(current_edge.dest.pos))")
         s1, s2 = splitedge!(D, current_edge, current_split)
-        joint = joinvertices!(D, current_vertex, current_split)
+        println("SPLIT RESULTS: $(s1), $(s2)")
+        joint = createedge!(D, current_vertex, current_split)
+        squeezeedge!(current_vertex, joint)
+        squeezeedge!(current_split, joint)
         joint.fr = current_left_face
         joint.fl = current_right_face
         current_left_face.edge = joint
@@ -228,52 +243,58 @@ function mergevoronoi(left::DCEL, right::DCEL)
         if right_first
             edge = ccw(joint, current_split)
             while true
-                edge.dead = true
-                if edge.dead || (current_right_vertex in endpoints(edge)) 
+                if edge.dead || current_right_vertex in endpoints(edge)
                     break
                 end
+                edge.dead = true
+                println("KILLED: ($(edge.orig.pos), $(edge.dest.pos))")
                 edge = cwface(joint.fl, edge)
             end
         else
             edge = cw(joint, current_split)
             println("CURRENTLY ON EDGE ($(edge.orig.pos), $(edge.dest.pos))")
-            if isnothing(current_left_vertex)
+            if !welded
                 @assert current_left_face == hl
                 while true
                     if isboundaryedge(edge)
-                        if !leftofedge(ray, edge.orig)
-                            println("THE WELD VERTEX IS TO THE RIGHT OF THE STARTING RAY")
-                            edge.orig = ray.dest
-                            edge.fl = hl
-                            edge.ccwo = ray
-                            edge.cwo = ray.ccwd
-                        else
+                        if edge.orig.pos[1] < edge.dest.pos[1]
                             println("THE WELD VERTEX IS TO THE LEFT OF THE STARTING RAY")
-                            edge.dest = ray.dest
+                            show(edge)
+                            edge.dest = upper_ray.dest
                             edge.fr = hl
-                            edge.ccwo = ray
-                            edge.cwo = ray.ccwd
+                            edge.ccwd = upper_ray
+                            edge.cwd = upper_ray.ccwd
+                        else
+                            println("THE WELD VERTEX IS TO THE RIGHT OF THE STARTING RAY")
+                            show(edge)
+                            edge.orig = upper_ray.dest
+                            edge.fl = hl
+                            edge.ccwo = upper_ray
+                            edge.cwo = upper_ray.ccwd
                         end
+                        welded = true
                         break
                     end
                     edge.dead = true
+                    println("KILLED: ($(edge.orig.pos), $(edge.dest.pos))")
                     edge = ccwface(current_left_face, edge)
                 end
             else
                 while true
-                    edge.dead = true
-                    if current_left_vertex in endpoints(edge)
+                    if edge.dead || current_left_vertex in endpoints(edge)
                         break
                     end
+                    edge.dead = true
+                    println("KILLED: ($(edge.orig.pos), $(edge.dest.pos))")
                     edge = ccwface(joint.fr, edge)
                 end
             end
         end
 
-        # joint.fr = current_left_face
-        # joint.fl = current_right_face
-        # current_left_face.edge = joint
-        # current_right_face.edge = joint
+        joint.fr = current_left_face
+        joint.fl = current_right_face
+        current_left_face.edge = joint
+        current_right_face.edge = joint
 
         if right_first
             current_right_face = oppositeface(current_right_face, current_edge)
@@ -357,4 +378,5 @@ fixids!(b)
 checkdcel(a)
 checkdcel(b)
 test = mergevoronoi(a, b)
+plotdcel(test, ratio=:equal, sites=true)
 # checkdcel(test)

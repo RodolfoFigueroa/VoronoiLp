@@ -2,7 +2,7 @@ module DStruct
 include("./vector.jl")
 import Base.show
 using Plots, Statistics, .DVector
-export Vertex, Face, Edge, DCEL, show, createvertex!, createedge!, createface!, createdummyvertex!, fixids!, checkdcel, plotdcel, cw, ccw, cwset!, ccwset!, add_join_vertex!, joinvertices!, addray!, splitedge!, deleteedge!, endpoints, midpoint, isboundaryedge, isstrutedge, cwface, ccwface, commonvertex, resetfacelist!, leftofedge
+export Vertex, Face, Edge, DCEL, show, createvertex!, createedge!, createface!, createdummyvertex!, fixids!, checkdcel, plotdcel, cw, ccw, cwset!, ccwset!, add_join_vertex!, joinvertices!, addray!, splitedge!, deleteedge!, endpoints, midpoint, isboundaryedge, isstrutedge, cwface, ccwface, commonvertex, resetfacelist!, leftofedge, perpangle, settopology!, squeezeedge!
 
 mutable struct Vertex
     id::String
@@ -138,26 +138,34 @@ function fixids!(D::DCEL)::Nothing
     return
 end
 
-function plotdcel(D::DCEL, radius::Number=1, faces::Bool=false)
+function plotdcel(D::DCEL; faces::Bool=false, dead::Bool=false, bounds::Bool=true, ratio::Any=:equal, sites::Bool=false)
     p = plot(leg=false)
     for v in D.vertexlist
         color = v.original ? :black : :red
-        scatter!(p, [v.pos[1]], [v.pos[2]], series_annotations=[Plots.text("\nv$(v.id)"), :bottom], color=color)
+        scatter!(p, [v.pos[1]], [v.pos[2]], series_annotations=[Plots.text("\nv$(v.id)"), :bottom], color=color, aspect_ratio=ratio)
     end
     for e in D.edgelist
+        bound = isboundaryedge(e)
         if e.dead
             color = :gray
         else
-            color = isboundaryedge(e) ? :red : :black
+            color = bound ? :red : :black
         end
         ave = edgecenter(e)
-        plot!(p, [e.orig.pos[1],e.dest.pos[1]], [e.orig.pos[2],e.dest.pos[2]], line=:arrow, annotations = (ave[1], ave[2], "e$(e.id)"), linecolor=color)
+        if (!e.dead || dead) && (!bound || bounds)
+            plot!(p, [e.orig.pos[1],e.dest.pos[1]], [e.orig.pos[2],e.dest.pos[2]], line=:arrow, annotations = (ave[1], ave[2], "e$(e.id)"), linecolor=color, aspect_ratio=ratio)
+        end
     end
-    if faces
-        for f in D.facelist
+    for f in D.facelist
+        if faces
             vertices = faceverticesccw(f)
             x,y = mean(getfield.(vertices, :pos))
             annotate!([x],[y], "f$(f.id)")
+        end
+        if sites
+            if !isnothing(f.site)
+                scatter!([f.site[1]], [f.site[2]])
+            end
         end
     end
     return p
@@ -287,6 +295,7 @@ function isstrutedge(e::Edge)::Bool
     return xor(a[1], a[2])
 end
 
+#Magic
 function squeezeedge!(v::Vertex, e::Edge, previous::Union{Edge,Nothing}=nothing)::Nothing
     @assert v in endpoints(e)
     if isnothing(v.edge)
@@ -654,5 +663,9 @@ function midpoint(f1::Face, f2::Face)::Array
     return mean([f1.site, f2.site])
 end
 
+function perpangle(start::Array, finish::Array)::Float64
+    return atan(finish[2]-start[2], finish[1]-start[1]) + pi/2
+end
+perpangle(f1::Face, f2::Face)::Float64 = perpangle(f1.site, f2.site)
 
 end

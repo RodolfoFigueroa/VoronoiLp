@@ -1,5 +1,5 @@
 module DVector
-export dot, cross2d, norm, distance, pointccw, midpoints, angleccw
+export dot, cross2d, norm, distance, pointccw, midpoints, angleccw, cosatan, sinatan
 
 function cross2d(u::Array, v::Array)::Float64
     return u[1]*v[2] - u[2]*v[1]
@@ -13,7 +13,7 @@ function norm(a::Array)::Float64
     return sqrt(sum(a .^2))
 end
 
-function distance(p::Array, q::Array)::Float64 
+function distance(p::Array, q::Array)::Float64
 	return norm(p .-q)
 end
 
@@ -45,7 +45,7 @@ function pointccw(array::Array)::Bool
     return sum <= 0
 end
 
-function midpoints(u::Array, v::Array, w::Array)::Tuple 
+function midpoints(u::Array, v::Array, w::Array)::Tuple
     return mean([u,v]), mean([v,w]), mean([w,u])
 end
 
