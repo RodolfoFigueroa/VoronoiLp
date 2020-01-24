@@ -2,7 +2,7 @@ module DStruct
 include("./vector.jl")
 import Base.show
 using Plots, Statistics, .DVector
-export mergevoronoi, voronoitwopoints, voronoithreepoints
+export DCEL, Vertex, Edge, Face, createvertex!, splitedge!, addray!, joinvertices!, voronoitwopoints, voronoithreepoints, fixids!, checkdcel, mergeinfinitefaces!, joindcel, findextrema, perpangle, midpoint, facerayintersection, ccw, cw, ccwface, cwface, hideedge, isboundaryedge, commonvertex, oppositeface, plotdcel, endpoints, unstickedge
 
 mutable struct Vertex
     id::String
@@ -177,10 +177,10 @@ end
 
 function checkdcel(D::DCEL)
     for e in D.edgelist
-        @assert cw(ccw(e,e.orig),e.orig) == e "1 $(e)"
-        @assert ccw(cw(e,e.orig),e.orig) == e "2 $(e)"
-        @assert cw(ccw(e,e.dest),e.dest) == e "3 $(e)"
-        @assert ccw(cw(e,e.dest),e.dest) == e "4 $(e)"
+        @assert cw(e.ccwo, e.orig) == e "1 $(e)"
+        @assert ccw(e.cwo, e.orig) == e "2 $(e)"
+        @assert cw(e.ccwd, e.dest) == e "3 $(e)"
+        @assert ccw(e.cwd, e.dest) == e "4 $(e)"
         @assert e.orig != e.dest
         if isstrutedge(e)
             @assert e.orig.original && !e.dest.original
@@ -319,22 +319,29 @@ function isstrutedge(e::Edge)::Bool
 end
 
 #Magic
-function squeezeedge!(v::Vertex, e::Edge, previous::Union{Edge,Nothing}=nothing)::Nothing
+function squeezeedge!(v::Vertex, e::Edge; previous::Union{Edge,Nothing}=nothing, next::Union{Edge,Nothing}=nothing)::Nothing
     @assert v in endpoints(e)
     if isnothing(v.edge)
         return
     end
-    previous_set = true
-    if isnothing(previous)
-        previous_set = false
+    previous_set = next_set = true
+
+    if isnothing(previous) && isnothing(next)
+        previous_set = next_set = false
         previous = v.edge
+    elseif isnothing(previous)
+        previous_set = false
+        previous = cw(next, v)
+    elseif isnothing(next)
+        next_set = false
+    else
+        @assert ccw(previous, v) == next
     end
     while true
-        next = ccw(previous, v)
-        # while next.dead
-        #     next = ccw(previous, v)
-        # end
-        if previous_set || sorted_ccw(previous, e, next)
+        if !next_set
+            next = ccw(previous, v)
+        end
+        if previous_set || next_set || sorted_ccw(previous, e, next)
             fr = v==previous.orig ? previous.fl : previous.fr
             fl = v==next.orig ? next.fr : next.fl
             if v == e.orig
@@ -380,11 +387,11 @@ edgelength(e::Edge) = norm(mean(endfield(e, :pos)))::Float64
 
 edgecenter(e::Edge) = mean(endfield(e, :pos))::Array
 
-function joinvertices!(D::DCEL, u::Vertex, v::Vertex, split_face::Bool=true; p1::Union{Edge,Nothing}=nothing, p2::Union{Edge,Nothing}=nothing)::Edge
+function joinvertices!(D::DCEL, u::Vertex, v::Vertex, split_face::Bool=true; po::Union{Edge,Nothing}=nothing, pd::Union{Edge,Nothing}=nothing, no::Union{Edge,Nothing}=nothing, nd::Union{Edge,Nothing}=nothing)::Edge
     @assert u != v "Cannot join a vertex to itself"
     new_edge = createedge!(D, u, v)
-    squeezeedge!(u, new_edge, p1)
-    squeezeedge!(v, new_edge, p2)
+    squeezeedge!(u, new_edge, previous=po, next=no)
+    squeezeedge!(v, new_edge, previous=pd, next=nd)
     disconnected = isnothing(u.edge) || isnothing(v.edge)
     u.edge = v.edge = new_edge
     if disconnected
@@ -577,10 +584,6 @@ function resetfacelist!(a::DCEL, new_face::Face, face::Union{Face,Nothing}=nothi
     return
 end
 
-function f()
-    return 1
-end
-
 function addray!(D::DCEL, u::Vertex, angle::Number, f::Union{Face,Nothing}=nothing, split_face::Bool=true)
     l = length(D.dummylist)
     v = createdummyvertex!(D, u, angle)
@@ -589,7 +592,7 @@ function addray!(D::DCEL, u::Vertex, angle::Number, f::Union{Face,Nothing}=nothi
         new_edge = joinvertices!(D, u, v)
         if l == 1
             outer = joinvertices!(D, D.dummylist[1], v)
-            joinvertices!(D, v, D.dummylist[1], p1=outer, p2=getstrut(D.dummylist[1]))
+            joinvertices!(D, v, D.dummylist[1], po=outer, pd=getstrut(D.dummylist[1]))
         end
     else
         outeredge = nothing
@@ -609,7 +612,7 @@ function addray!(D::DCEL, u::Vertex, angle::Number, f::Union{Face,Nothing}=nothi
         end
         e1, e2 = splitedge!(D, outeredge, v)
         previous = ccwface(f, e1) == e2 ? e2 : e1
-        new_edge = joinvertices!(D, u, v, split_face, p2=previous)
+        new_edge = joinvertices!(D, u, v, split_face, pd=previous)
     end
     return new_edge
 end
@@ -702,14 +705,27 @@ function perpangle(start::Array, finish::Array)::Float64
 end
 perpangle(f1::Face, f2::Face)::Float64 = perpangle(f1.site, f2.site)
 
-# function hideedge(e::Edge)::Nothing
-#     e.dead = true
-#     ccwset!(e.cwo, e.orig, e.ccwo)
-#     cwset!(e.ccwo, e.orig, e.cwo)
-#     ccwset!(e.cwd, e.dest, e.ccwd)
-#     cwset!(e.ccwd, e.dest, e.cwd)
-#     return
-# end
+function hideedge(e::Edge)::Nothing
+    e.dead = true
+    ccwset!(e.cwo, e.orig, e.ccwo)
+    cwset!(e.ccwo, e.orig, e.cwo)
+    ccwset!(e.cwd, e.dest, e.ccwd)
+    cwset!(e.ccwd, e.dest, e.cwd)
+    return
+end
+
+function unstickedge(e::Edge, v::Vertex)
+    if v == e.orig
+        ccwset!(e.cwo, e.orig, e.ccwo)
+        cwset!(e.ccwo, e.orig, e.cwo)
+    elseif v == e.dest
+        ccwset!(e.cwd, e.dest, e.ccwd)
+        cwset!(e.ccwd, e.dest, e.cwd)
+    else
+        throw("Given vertex is not in endpoints of edge")
+    end
+    return
+end
 
 function bisectorangles(u::Array, v::Array, w::Array)
     p = perpangle(v, w)
@@ -739,7 +755,7 @@ function voronoithreepoints(points::Array)::DCEL
     outeredge = angleccw(a,b,c) ? p.cwd : r.cwd
     dummy = createdummyvertex!(D, m, b)
     s1, s2 = splitedge!(D, outeredge, dummy)
-    joinvertices!(D, m, dummy, p2=s2)
+    joinvertices!(D, m, dummy, pd=s2)
     p.fl.site = v
     p.fr.site = w
     p.ccwo.fl.site = u
@@ -816,7 +832,7 @@ function facerayintersection(f::Face, start::Array, angle::Number, clockwise::Bo
     println("\nCHECKING INTERSECTION OF FACE $(f)")
     while true
         # sleep(0.1)
-        println("\nCHECKING EDGE ($(edge.orig.pos), $(edge.dest.pos))")
+        println("\nCHECKING EDGE $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))")
         println("WITH LEFT FACE: $(edge.fl) AND RIGHT FACE: $(edge.fr)")
         if !isboundaryedge(edge) && !(edge in ignore)
             inter = edgerayintersection(edge, start, angle)
@@ -824,10 +840,11 @@ function facerayintersection(f::Face, start::Array, angle::Number, clockwise::Bo
                 return edge, inter
             end
         end
-        edge = clockwise ? cwface(f,edge) : ccwface(f,edge)
-        if edge == starter_edge
+        next_edge = clockwise ? cwface(f,edge) : ccwface(f,edge)
+        if next_edge == starter_edge || next_edge == edge
             return nothing, [-Inf,-Inf]
         end
+        edge = next_edge
     end
     return
 end
@@ -851,177 +868,6 @@ function oppositeface(f::Face, e::Edge)::Face
     return
 end
 
-#When I wrote this, only God and I understood what I was doing.
-#Now, only God knows.
-function mergevoronoi(left::DCEL, right::DCEL)
-    fi = mergeinfinitefaces!(left, right)
-    D = joindcel(left, right)
-    push!(D.facelist, fi)
-    hl, ll = findextrema(left)
-    hr, lr = findextrema(right)
-    angle = perpangle(hr, hl)
-    println("INITIAL RAY HAS AN ANGLE: $(rad2deg(angle))")
-    el, il = facerayintersection(hl, midpoint(hr, hl), angle, false)
-    er, ir = facerayintersection(hr, midpoint(hr, hl), angle, true)
-    split = Vertex
-    starter_right = Bool
-    s1 = s2 = Edge
-    if ir[2] > il[2]
-        println("INTERSECTED RIGHT DIAGRAM FIRST AT $(ir)")
-        starter_right = true
-        split = createvertex!(D, ir)
-        s1, s2 = splitedge!(D, er, split)
-    else
-        println("INTERSECTED LEFT DIAGRAM FIRST AT $(il)")
-        starter_right = false
-        split = createvertex!(D, il)
-        s1, s2 = splitedge!(D, el, split)
-    end
-    current_right_face = current_left_face = Face
-    current_right_vertex = current_left_vertex = nothing
-    upper_ray = Edge
-    if starter_right
-        upper_ray = addray!(D, split, angle+pi, hr, false)
-        println("RAY HAS AN ORIGIN $(upper_ray.orig.pos)")
-        starter_edge = ccw(upper_ray, split)
-        edge = starter_edge
-        # floating = false
-        while true
-            next = cwface(upper_ray.fl, edge)
-            edge.dead = true
-            # hideedge(edge)
-            println("KILLED: ($(edge.orig.pos), $(edge.dest.pos))")
-            if isboundaryedge(edge)
-                break
-            end
-            commonvertex(edge, next).dead = true
-            edge = next
-        end
-        current_right_face = oppositeface(upper_ray.fl, starter_edge)
-        current_left_face = hl
-        current_vertex = split
-        upper_ray.fl = hl
-        upper_ray.fr = hr
-        current_right_vertex = current_vertex
-        welded = false
-    end
-    while true
-        if current_left_face == ll && current_right_face == lr
-            # filter!(x -> !getfield(x, :dead), D.edgelist)
-            # filter!(x -> !getfield(x, :dead), D.vertexlist)
-            fixids!(D)
-            return D
-        end
-        angle = perpangle(current_right_face, current_left_face)
-        println("\n\n==NEXT BISECTOR HAS AN ANGLE: $(rad2deg(angle)) AND STARTS AT: $(current_vertex.pos)==")
-        er, ir = facerayintersection(current_right_face, current_vertex.pos, angle, true, [s1,s2])
-        if !isnothing(er)
-            println("\n=BISECTOR INTERSECTED RIGHT EDGE: ($(er.orig.pos), $(er.dest.pos) AT: $(ir)=")
-        end
-        el, il = facerayintersection(current_left_face, current_vertex.pos, angle, false, [s1,s2])
-        if !isnothing(el)
-            println("\n=BISECTOR INTERSECTED LEFT EDGE ($(el.orig.pos), $(el.dest.pos) AT: $(il)=")
-        end
-        current_edge = Edge
-        current_split = Vertex
-        right_first = Bool
-        if ir[2] > il[2]
-            println("\n+CHOSE RIGHT INTERSECTION+\n")
-            right_first = true
-            current_split = createvertex!(D, ir)
-            current_edge = er
-        elseif il[2] > ir[2]
-            println("\n+CHOSE LEFT INTERSECTION+\n")
-            right_first = false
-            current_split = createvertex!(D, il)
-            current_edge = el
-        else
-            throw("")
-        end
-        println("SPLITTING: ($(current_edge.orig.pos), $(current_edge.dest.pos))")
-        s1, s2 = splitedge!(D, current_edge, current_split)
-        println("SPLIT RESULTS: $(s1), $(s2)")
-        joint = joinvertices!(D, current_vertex, current_split, false)
-        joint.fr = current_left_face
-        joint.fl = current_right_face
-        current_left_face.edge = joint
-        current_right_face.edge = joint
-
-        if right_first
-            edge = ccw(joint, current_split)
-            while true
-                if edge.dead #|| current_right_vertex in endpoints(edge)
-                    break
-                end
-                # edge.dead = true
-                hideedge(edge)
-                println("KILLED: ($(edge.orig.pos), $(edge.dest.pos))")
-                edge = cwface(joint.fl, edge)
-            end
-        else
-            edge = cw(joint, current_split)
-            println("CURRENTLY ON EDGE ($(edge.orig.pos), $(edge.dest.pos))")
-            if !welded
-                @assert current_left_face == hl
-                while true
-                    if isboundaryedge(edge)
-                        if edge.ccwd.dead
-                            println("THE WELD VERTEX IS TO THE LEFT OF THE STARTING RAY")
-                            edge.dest = upper_ray.dest
-                            edge.fr = hl
-                            edge.ccwd = upper_ray
-                            edge.cwd = upper_ray.ccwd
-                        else
-                            println("THE WELD VERTEX IS TO THE RIGHT OF THE STARTING RAY")
-                            edge.orig = upper_ray.dest
-                            edge.fl = hl
-                            edge.ccwo = upper_ray
-                            edge.cwo = upper_ray.ccwd
-                        end
-                        welded = true
-                        break
-                    end
-                    # edge.dead = true
-                    hideedge(edge)
-                    println("KILLED: ($(edge.orig.pos), $(edge.dest.pos))")
-                    edge = ccwface(current_left_face, edge)
-                end
-            else
-                current_endpoints = Set([])
-                previous_endpoints = Set([])
-                while true
-                    current_endpoints = endpoints(edge)
-                    inter = intersect(current_endpoints, previous_endpoints)
-                    if !isempty(inter)
-                        pop!(inter).dead = true
-                    end
-                    if edge.dead #|| current_left_vertex in endpoints(edge)
-                        break
-                    end
-                    # edge.dead = true
-                    hideedge(edge)
-                    println("KILLED: ($(edge.orig.pos), $(edge.dest.pos))")
-                    edge = ccwface(joint.fr, edge)
-                    previous_endpoints = current_endpoints
-                end
-            end
-        end
-
-        # joint.fr = current_left_face
-        # joint.fl = current_right_face
-        # current_left_face.edge = joint
-        # current_right_face.edge = joint
-
-        if right_first
-            current_right_face = oppositeface(current_right_face, current_edge)
-        else
-            current_left_face = oppositeface(current_left_face, current_edge)
-        end
-        current_vertex = current_split
-
-    end
-    return D
-end
 
 function mergeinfinitefaces!(a::DCEL, b::DCEL)
     fi = Face("i")
