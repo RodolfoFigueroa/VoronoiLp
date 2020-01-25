@@ -2,7 +2,7 @@ module DStruct
 include("./vector.jl")
 import Base.show
 using Plots, Statistics, .DVector
-export DCEL, Vertex, Edge, Face, createvertex!, splitedge!, addray!, joinvertices!, voronoitwopoints, voronoithreepoints, fixids!, checkdcel, mergeinfinitefaces!, joindcel, findextrema, perpangle, midpoint, facerayintersection, ccw, cw, ccwface, cwface, hideedge, isboundaryedge, commonvertex, oppositeface, plotdcel, endpoints, unstickedge, squeezeedge!
+export DCEL, Vertex, Edge, Face, createvertex!, splitedge!, addray!, joinvertices!, voronoitwopoints, voronoithreepoints, fixids!, checkdcel, mergeinfinitefaces!, joindcel, findextrema, perpangle, midpoint, facerayintersection, ccw, cw, ccwface, cwface, hideedge, isboundaryedge, commonvertex, oppositeface, plotdcel, endpoints, unstickedge, squeezeedge!, faceedgesccw, faceedgescw, settopology!
 
 mutable struct Vertex
     id::String
@@ -177,10 +177,10 @@ end
 
 function checkdcel(D::DCEL)
     for e in D.edgelist
-        @assert cw(e.ccwo, e.orig) == e "1 $(e)"
-        @assert ccw(e.cwo, e.orig) == e "2 $(e)"
-        @assert cw(e.ccwd, e.dest) == e "3 $(e)"
-        @assert ccw(e.cwd, e.dest) == e "4 $(e)"
+        @assert cw(e.ccwo, e.orig) == e "ccwo->cwo $(e)"
+        @assert ccw(e.cwo, e.orig) == e "cwo->ccwo $(e)"
+        @assert cw(e.ccwd, e.dest) == e "ccwd->cwd $(e)"
+        @assert ccw(e.cwd, e.dest) == e "cwd->ccwd $(e)"
         @assert e.orig != e.dest
         if isstrutedge(e)
             @assert e.orig.original && !e.dest.original
@@ -190,15 +190,16 @@ function checkdcel(D::DCEL)
     pos_list = getfield.(D.vertexlist, :pos)
 
     for f in D.facelist
-        edges = faceedgesccw(f)
-        for e in edges
+        edgesccw = faceedgesccw(f)
+        edgescw = faceedgescw(f)
+        @assert isempty(setdiff(edgescw, edgesccw))
+        for e in edgescw
             @assert f==e.fr || f==e.fl "$(f):$(e)"
         end
-        edges = faceedgescw(f)
-        for e in edges
+        for e in edgesccw
             @assert f==e.fr || f==e.fl "$(f):$(e)"
         end
-
+        @assert isempty(setdiff(faceverticescw(f), faceverticescw(f)))
     end
     return
 end
@@ -465,7 +466,7 @@ function ccwface(f::Face, edge::Union{Edge,Nothing}=nothing)::Edge
     elseif f == edge.fl
         return edge.cwd
     else
-        throw("Looking for $(f) in $(edge.fl) and $(edge.fr)")
+        throw("Looking for $(f) in e$(edge.id) with fl=$(edge.fl) and fr=$(edge.fr)")
     end
     return
 end
@@ -575,10 +576,7 @@ function resetface(face::Face, new_face::Face)
     return
 end
 
-function resetfacelist!(a::DCEL, new_face::Face, face::Union{Face,Nothing}=nothing)
-    if isnothing(face)
-        face = findinfiniteface(a)
-    end
+function resetfacelist!(a::DCEL, face::Face, new_face::Face)
     resetface(face, new_face)
     filter!(x->x !=face, a.facelist)
     return
@@ -877,8 +875,11 @@ end
 
 function mergeinfinitefaces!(a::DCEL, b::DCEL)
     fi = Face("i")
-    resetfacelist!(a, fi)
-    resetfacelist!(b, fi)
+    fa = findinfiniteface(a)
+    fb = findinfiniteface(b)
+    resetfacelist!(a, fa, fi)
+    resetfacelist!(b, fb, fi)
+    fi.edge = fa.edge
     return fi
 end
 
