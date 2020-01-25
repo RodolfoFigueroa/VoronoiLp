@@ -2,7 +2,7 @@ module DStruct
 include("./vector.jl")
 import Base.show
 using Plots, Statistics, .DVector
-export DCEL, Vertex, Edge, Face, createvertex!, splitedge!, addray!, joinvertices!, voronoitwopoints, voronoithreepoints, fixids!, checkdcel, mergeinfinitefaces!, joindcel, findextrema, perpangle, midpoint, facerayintersection, ccw, cw, ccwface, cwface, hideedge, isboundaryedge, commonvertex, oppositeface, plotdcel, endpoints, unstickedge
+export DCEL, Vertex, Edge, Face, createvertex!, splitedge!, addray!, joinvertices!, voronoitwopoints, voronoithreepoints, fixids!, checkdcel, mergeinfinitefaces!, joindcel, findextrema, perpangle, midpoint, facerayintersection, ccw, cw, ccwface, cwface, hideedge, isboundaryedge, commonvertex, oppositeface, plotdcel, endpoints, unstickedge, squeezeedge!
 
 mutable struct Vertex
     id::String
@@ -480,8 +480,8 @@ function cwface(f::Face, edge::Union{Edge,Nothing}=nothing)::Edge
         return edge.ccwd
     elseif f == edge.fl
         return edge.ccwo
-    else
-        throw("$(f) has a topology problem")
+    else #sanity
+        throw("$f has a topology problem with edge $edge")
     end
     return
 end
@@ -707,6 +707,12 @@ perpangle(f1::Face, f2::Face)::Float64 = perpangle(f1.site, f2.site)
 
 function hideedge(e::Edge)::Nothing
     e.dead = true
+    if e.fr.edge == e
+        e.fr.edge = e.ccwo
+    end
+    if e.fl.edge == e
+        e.fl.edge = e.ccwo
+    end
     ccwset!(e.cwo, e.orig, e.ccwo)
     cwset!(e.ccwo, e.orig, e.cwo)
     ccwset!(e.cwd, e.dest, e.ccwd)
