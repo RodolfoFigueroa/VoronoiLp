@@ -100,22 +100,25 @@ function weldedges(joint::Edge, lr::Face, ll::Face, right::Bool; io=stdout)
     return
 end
 
-function godhelpme()
+function upperweld(edge::Edge, upper_ray::Edge, hr::Face, hl::Face, right::Bool; io=stdout)
     while true
         hideedge(edge)
-        println("KILLED (3): $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))")
-        next_edge = ccwface(current_left_face, edge)
+        write(io, "KILLED (3): $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))\n")
+        next_edge = right ? cwface(hr, edge) : ccwface(hl, edge)
         commonvertex(edge, next_edge).dead = true
         if isboundaryedge(next_edge)
             common_vertex = commonvertex(edge, next_edge)
             unstickedge!(next_edge, common_vertex)
             if common_vertex == next_edge.dest
                 next_edge.dest = upper_ray.dest
-                squeezeedge!(upper_ray.dest, next_edge, next=upper_ray)
-                next_edge.fr = hl
+                right ? next_edge.fl = hr : next_edge.fr = hl
             elseif common_vertex == next_edge.orig
                 next_edge.orig = upper_ray.dest
-                next_edge.fl = hl
+                right ? next_edge.fr = hr : next_edge.fl = hl
+            end
+            if right
+                squeezeedge!(upper_ray.dest, next_edge, previous=upper_ray)
+            else
                 squeezeedge!(upper_ray.dest, next_edge, next=upper_ray)
             end
             break
@@ -135,7 +138,7 @@ function mergevoronoi(left::DCEL, right::DCEL, logging::Bool=false)
     hl, ll = findextrema(left)
     hr, lr = findextrema(right)
     angle = perpangle(hr, hl)
-    write(io, "INITIAL RAY HAS AN ANGLE: $(rad2deg(angle))\n")
+    write(io, "==INITIAL RAY HAS AN ANGLE: $(rad2deg(angle))==\n")
     el, il = facerayintersection(hl, midpoint(hr, hl), angle, false, io=io)
     er, ir = facerayintersection(hr, midpoint(hr, hl), angle, true, io=io)
     starter_right, split, s1, s2 = diagramintersection(ir, il, er, el, io=io)
@@ -215,29 +218,7 @@ function mergevoronoi(left::DCEL, right::DCEL, logging::Bool=false)
                 weld_set = true
                 killface!(edge, joint, true, io=io)
             elseif current_right_face == hr
-                write(io, "HUASDUAHSODIHAOHDAOSDHAOIHD\n")
-                while true
-                    hideedge(edge)
-                    write(io, "KILLED (3): $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))\n")
-                    next_edge = ccwface(hr, edge)
-                    commonvertex(edge, next_edge).dead = true
-                    if isboundaryedge(next_edge)
-                        common_vertex = commonvertex(edge, next_edge)
-                        unstickedge!(next_edge, common_vertex)
-                        if common_vertex == next_edge.dest
-                            next_edge.dest = upper_ray.dest
-                            write(io, "ASD\n")
-                            next_edge.fr = hl
-                        elseif common_vertex == next_edge.orig
-                            next_edge.orig = upper_ray.dest
-                            write(io, "ASD2\n")
-                            next_edge.fl = hl
-                        end
-                        squeezeedge!(upper_ray.dest, next_edge, next=upper_ray)
-                        break
-                    end
-                    edge = next_edge
-                end
+                upperweld(edge, upper_ray, hr, hl, true, io=io)
             else
                 killface!(edge, joint, true, io=io)
             end
@@ -249,26 +230,7 @@ function mergevoronoi(left::DCEL, right::DCEL, logging::Bool=false)
                 weld_set = true
                 killface!(edge, joint, false, io=io)
             elseif current_left_face == hl
-                while true
-                    hideedge(edge)
-                    write(io, "KILLED (3): $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))\n")
-                    next_edge = ccwface(hl, edge)
-                    commonvertex(edge, next_edge).dead = true
-                    if isboundaryedge(next_edge)
-                        common_vertex = commonvertex(edge, next_edge)
-                        unstickedge!(next_edge, common_vertex)
-                        if common_vertex == next_edge.dest
-                            next_edge.dest = upper_ray.dest
-                            next_edge.fr = hl
-                        elseif common_vertex == next_edge.orig
-                            next_edge.orig = upper_ray.dest
-                            next_edge.fl = hl
-                        end
-                        squeezeedge!(upper_ray.dest, next_edge, next=upper_ray)
-                        break
-                    end
-                    edge = next_edge
-                end
+                upperweld(edge, upper_ray, hr, hl, false, io=io)
             else
                 killface!(edge, joint, false, io=io)
             end
