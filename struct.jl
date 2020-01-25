@@ -2,7 +2,7 @@ module DStruct
 include("./vector.jl")
 import Base.show
 using Plots, Statistics, .DVector
-export DCEL, Vertex, Edge, Face, createvertex!, splitedge!, addray!, joinvertices!, voronoitwopoints, voronoithreepoints, fixids!, checkdcel, mergeinfinitefaces!, joindcel, findextrema, perpangle, midpoint, facerayintersection, ccw, cw, ccwface, cwface, hideedge, isboundaryedge, commonvertex, oppositeface, plotdcel, endpoints, unstickedge, squeezeedge!, faceedgesccw, faceedgescw, settopology!
+export DCEL, Vertex, Edge, Face, createvertex!, splitedge!, addray!, joinvertices!, voronoitwopoints, voronoithreepoints, fixids!, checkdcel, mergeinfinitefaces!, joindcel, findextrema, perpangle, midpoint, facerayintersection, ccw, cw, ccwface, cwface, hideedge, isboundaryedge, commonvertex, oppositeface, plotdcel, endpoints, unstickedge!, squeezeedge!, faceedgesccw, faceedgescw, settopology!
 
 mutable struct Vertex
     id::String
@@ -703,22 +703,7 @@ function perpangle(start::Array, finish::Array)::Float64
 end
 perpangle(f1::Face, f2::Face)::Float64 = perpangle(f1.site, f2.site)
 
-function hideedge(e::Edge)::Nothing
-    e.dead = true
-    if e.fr.edge == e
-        e.fr.edge = e.ccwo
-    end
-    if e.fl.edge == e
-        e.fl.edge = e.ccwo
-    end
-    ccwset!(e.cwo, e.orig, e.ccwo)
-    cwset!(e.ccwo, e.orig, e.cwo)
-    ccwset!(e.cwd, e.dest, e.ccwd)
-    cwset!(e.ccwd, e.dest, e.cwd)
-    return
-end
-
-function unstickedge(e::Edge, v::Vertex)
+function unstickedge!(e::Edge, v::Vertex)
     if v == e.orig
         ccwset!(e.cwo, e.orig, e.ccwo)
         cwset!(e.ccwo, e.orig, e.cwo)
@@ -728,6 +713,19 @@ function unstickedge(e::Edge, v::Vertex)
     else
         throw("Given vertex is not in endpoints of edge")
     end
+    return
+end
+
+function hideedge(e::Edge)::Nothing
+    e.dead = true
+    if e.fr.edge == e
+        e.fr.edge = e.ccwo
+    end
+    if e.fl.edge == e
+        e.fl.edge = e.ccwo
+    end
+    unstickedge!(e, e.orig)
+    unstickedge!(e, e.dest)
     return
 end
 
@@ -830,14 +828,13 @@ end
 #     return u>=0 && 0<=t<=1 ? p+t*r : [NaN,NaN]
 # end
 
-function facerayintersection(f::Face, start::Array, angle::Number, clockwise::Bool, ignore::Array=[])
+function facerayintersection(f::Face, start::Array, angle::Number, clockwise::Bool, ignore::Array=[]; io=stdout)
     starter_edge = f.edge
     edge = starter_edge
-    println("\nCHECKING INTERSECTION OF FACE $(f)")
+    write(io, "CHECKING INTERSECTION OF FACE $(f)\n")
     while true
-        # sleep(0.1)
-        println("\nCHECKING EDGE $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))")
-        println("WITH LEFT FACE: $(edge.fl) AND RIGHT FACE: $(edge.fr)")
+        write(io, "CHECKING EDGE $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))\n")
+        write(io, "WITH LEFT FACE: $(edge.fl) AND RIGHT FACE: $(edge.fr)\n")
         if !isboundaryedge(edge) && !(edge in ignore)
             inter = edgerayintersection(edge, start, angle)
             if !isnan(inter[1])
@@ -846,6 +843,7 @@ function facerayintersection(f::Face, start::Array, angle::Number, clockwise::Bo
         end
         next_edge = clockwise ? cwface(f,edge) : ccwface(f,edge)
         if next_edge == starter_edge || next_edge == edge
+            write(io, "FOUND NO INTERSECTION\n")
             return nothing, [-Inf,-Inf]
         end
         edge = next_edge
@@ -853,18 +851,16 @@ function facerayintersection(f::Face, start::Array, angle::Number, clockwise::Bo
     return
 end
 
-function oppositeface(f::Face, e::Edge)::Face
-    println("CHECKING OPPOSITE FACE OF: $(f)")
-    println("\nWITH MIRROR EDGE: $(e.orig.pos), $(e.dest.pos)")
-    println("MIRROR RIGHT FACE: $(e.fr)")
-    println("MIRROR LEFT FACE: $(e.fl)")
+function oppositeface(f::Face, e::Edge; io=stdout)::Face
+    write(io, "CHECKING OPPOSITE FACE OF: $(f)\n")
+    write(io, "WITH MIRROR EDGE: $(e.orig.pos), $(e.dest.pos)\n")
+    write(io, "MIRROR RIGHT FACE: $(e.fr)\n")
+    write(io, "MIRROR LEFT FACE: $(e.fl)\n")
     if e.fr.site == f.site
-        println("FOUND OPPOSITE: ")
-        show(e.fl)
+        write(io, "FOUND OPPOSITE: $(e.fl)\n")
         return e.fl
     elseif e.fl.site == f.site
-        println("FOUND OPPOSITE: ")
-        show(e.fr)
+        write(io, "FOUND OPPOSITE: $(e.fr)\n")
         return e.fr
     else
         throw("Face $(f) has a topology problem")

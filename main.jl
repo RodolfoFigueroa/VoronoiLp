@@ -32,14 +32,14 @@ function voronoi(start_points::Array)
     return
 end
 
-function killface!(edge::Edge, joint::Edge, right::Bool)
+function killface!(edge::Edge, joint::Edge, right::Bool; io=stdout)
     while true
         next_edge = right ? cwface(joint.fl, edge) : ccwface(joint.fr, edge)
         hideedge(edge)
         v = commonvertex(edge, next_edge)
         v.dead = true
-        println("KILLED VERTEX: $(v.id)")
-        println("KILLED (1): $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))")
+        write(io, "KILLED VERTEX: $(v.id)")
+        write(io, "KILLED (1): $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))")
         if edge == next_edge #edge.dead #|| current_left_vertex in endpoints(edge)
             break
         end
@@ -48,14 +48,14 @@ function killface!(edge::Edge, joint::Edge, right::Bool)
     return
 end
 
-function firstray!(split::Vertex, angle::Number, hr::Face, hl::Face, right::Bool)
+function firstray!(split::Vertex, angle::Number, hr::Face, hl::Face, right::Bool; io=stdout)
     upper_ray = addray!(D, split, angle+pi, right ? hr : hl, false)
-    println("RAY HAS AN ORIGIN $(upper_ray.orig.pos)")
+    write(io, "RAY HAS AN ORIGIN $(upper_ray.orig.pos)\n")
     starter_edge = right ? ccw(upper_ray, split) : cw(upper_ray, split)
     edge = starter_edge
     while true
         hideedge(edge)
-        println("KILLED (2): $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))")
+        write(io, "KILLED (2): $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))\n")
         if isboundaryedge(edge)
             break
         end
@@ -69,14 +69,14 @@ function firstray!(split::Vertex, angle::Number, hr::Face, hl::Face, right::Bool
 end
 
 
-function diagramintersection(ir::Array, il::Array, er::Union{Edge,Nothing}, el::Union{Edge,Nothing})
+function diagramintersection(ir::Array, il::Array, er::Union{Edge,Nothing}, el::Union{Edge,Nothing}; io=stdout)
     if ir[2] > il[2]
-        println("INTERSECTED RIGHT DIAGRAM FIRST AT $(ir)")
+        write(io, "\n++INTERSECTED RIGHT DIAGRAM FIRST AT $(ir)++\n")
         starter_right = true
         split = createvertex!(D, ir)
         s1, s2 = splitedge!(D, er, split)
     elseif il[2] > ir[2]
-        println("INTERSECTED LEFT DIAGRAM FIRST AT $(il)")
+        write(io, "\n++INTERSECTED LEFT DIAGRAM FIRST AT $(il)++\n")
         starter_right = false
         split = createvertex!(D, il)
         s1, s2 = splitedge!(D, el, split)
@@ -84,8 +84,8 @@ function diagramintersection(ir::Array, il::Array, er::Union{Edge,Nothing}, el::
     return starter_right, split, s1, s2
 end
 
-function weldedges(joint::Edge, lr::Face, ll::Face, right::Bool)
-    println("WELDING...")
+function weldedges(joint::Edge, lr::Face, ll::Face, right::Bool; io=stdout)
+    write(io, "WELDING...\n")
     weld_edge = right ? joint.cwo : joint.ccwo
     next_weld_edge = Edge
     while true
@@ -100,45 +100,58 @@ function weldedges(joint::Edge, lr::Face, ll::Face, right::Bool)
     return
 end
 
-# println("SPECIAL 2")
-# weld_edge = joint.ccwo
-# while true
-#     next_weld_edge = cwface(lr, weld_edge)
-#     if isboundaryedge(next_weld_edge)
-#         common_weld_vertex = commonvertex(weld_edge, next_weld_edge)
-#         weld_vertex = common_weld_vertex==next_weld_edge.orig ? next_weld_edge.dest : next_weld_edge.orig
-#         break
-#     end
-#     weld_edge = next_weld_edge
-# end
+function godhelpme()
+    while true
+        hideedge(edge)
+        println("KILLED (3): $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))")
+        next_edge = ccwface(current_left_face, edge)
+        commonvertex(edge, next_edge).dead = true
+        if isboundaryedge(next_edge)
+            common_vertex = commonvertex(edge, next_edge)
+            unstickedge!(next_edge, common_vertex)
+            if common_vertex == next_edge.dest
+                next_edge.dest = upper_ray.dest
+                squeezeedge!(upper_ray.dest, next_edge, next=upper_ray)
+                next_edge.fr = hl
+            elseif common_vertex == next_edge.orig
+                next_edge.orig = upper_ray.dest
+                next_edge.fl = hl
+                squeezeedge!(upper_ray.dest, next_edge, next=upper_ray)
+            end
+            break
+        end
+        edge = next_edge
+    end
+    return
+end
 
 #When I wrote this, only God and I understood what I was doing.
 #Now, only God knows.
-function mergevoronoi(left::DCEL, right::DCEL)
-    counter = 0
+function mergevoronoi(left::DCEL, right::DCEL, logging::Bool=false)
+    io = logging ? open("log.txt", "w") : stdout
     fi = mergeinfinitefaces!(left, right)
     global D = joindcel(left, right)
     push!(D.facelist, fi)
     hl, ll = findextrema(left)
     hr, lr = findextrema(right)
     angle = perpangle(hr, hl)
-    println("INITIAL RAY HAS AN ANGLE: $(rad2deg(angle))")
-    el, il = facerayintersection(hl, midpoint(hr, hl), angle, false)
-    er, ir = facerayintersection(hr, midpoint(hr, hl), angle, true)
-    starter_right, split, s1, s2 = diagramintersection(ir, il, er, el)
+    write(io, "INITIAL RAY HAS AN ANGLE: $(rad2deg(angle))\n")
+    el, il = facerayintersection(hl, midpoint(hr, hl), angle, false, io=io)
+    er, ir = facerayintersection(hr, midpoint(hr, hl), angle, true, io=io)
+    starter_right, split, s1, s2 = diagramintersection(ir, il, er, el, io=io)
 
     current_right_face = current_left_face = Face
     current_right_vertex = current_left_vertex = nothing
     upper_ray = Edge
     if starter_right
-        upper_ray = firstray!(split, angle, hr, hl, true)
-        current_right_face = oppositeface(hr, upper_ray.cwo)
+        upper_ray = firstray!(split, angle, hr, hl, true, io=io)
+        current_right_face = oppositeface(hr, upper_ray.cwo, io=io)
         current_left_face = hl
         current_right_vertex = split
     else
-        upper_ray = firstray!(split, angle, hr, hl, false)
+        upper_ray = firstray!(split, angle, hr, hl, false, io=io)
         current_right_face = hr
-        current_left_face = oppositeface(hl, upper_ray.ccwo)
+        current_left_face = oppositeface(hl, upper_ray.ccwo, io=io)
         current_left_vertex = split
     end
     current_vertex = split
@@ -148,12 +161,12 @@ function mergevoronoi(left::DCEL, right::DCEL)
     finisher_right = Bool
     while true
         angle = perpangle(current_right_face, current_left_face)
-        println("\n\n==NEXT BISECTOR HAS AN ANGLE: $(rad2deg(angle)) AND STARTS AT: $(current_vertex.pos)==")
+        write(io, "\n==NEXT BISECTOR HAS AN ANGLE: $(rad2deg(angle)) AND STARTS AT: $(current_vertex.pos)==\n")
         if current_left_face == ll && current_right_face == lr
             lower_ray = addray!(D, current_vertex, angle, finisher_right ? lr : ll, false)
             settopology!(lower_ray, new_fr=ll, new_fl=lr)
             hideedge(finisher_right ? lower_ray.ccwd : lower_ray.cwd)
-            println("KILLED (4): $(lower_ray.ccwd)")
+            write(io, "KILLED (4): $(lower_ray.ccwd)\n")
             if next_weld_edge.orig == weld_vertex
                 next_weld_edge.orig = lower_ray.dest
             elseif next_weld_edge.dest == weld_vertex
@@ -169,21 +182,18 @@ function mergevoronoi(left::DCEL, right::DCEL)
             filter!(x -> !getfield(x, :dead), D.edgelist)
             filter!(x -> !getfield(x, :dead), D.vertexlist)
             fixids!(D)
+            if logging
+                close(io)
+            end
             return D
         end
         if current_right_face != lr
-            er, ir = facerayintersection(current_right_face, current_vertex.pos, angle, true, [s1,s2])
-            if !isnothing(er)
-                println("\n=BISECTOR INTERSECTED RIGHT EDGE: ($(er.orig.pos), $(er.dest.pos) AT: $(ir)=")
-            end
+            er, ir = facerayintersection(current_right_face, current_vertex.pos, angle, true, [s1,s2], io=io)
         else
             ir = [-Inf, -Inf]
         end
         if current_left_face != ll
-            el, il = facerayintersection(current_left_face, current_vertex.pos, angle, false, [s1,s2])
-            if !isnothing(el)
-                println("\n=BISECTOR INTERSECTED LEFT EDGE ($(el.orig.pos), $(el.dest.pos) AT: $(il)=")
-            end
+            el, il = facerayintersection(current_left_face, current_vertex.pos, angle, false, [s1,s2], io=io)
         else
             il = [-Inf, -Inf]
         end
@@ -191,59 +201,78 @@ function mergevoronoi(left::DCEL, right::DCEL)
         current_split = Vertex
         right_first = Bool
         current_edge = ir[2]>il[2] ? er : el
-        right_first, current_split, s1, s2 = diagramintersection(ir, il, er, el)
+        right_first, current_split, s1, s2 = diagramintersection(ir, il, er, el, io=io)
         joint = joinvertices!(D, current_vertex, current_split, false)
         settopology!(joint, new_fr=current_left_face, new_fl=current_right_face)
-        println("CREATED JOINT $(joint.id): ($(joint.orig.pos), $(joint.dest.pos)) AND ASSIGNED FL:$current_right_face, FR:$current_left_face")
+        write(io, "CREATED JOINT $(joint.id): ($(joint.orig.pos), $(joint.dest.pos)) AND ASSIGNED FL:$current_right_face, FR:$current_left_face\n")
         current_left_face.edge = current_right_face.edge = joint
+        edge = right_first ? joint.ccwd : joint.cwd
+        write(io, "CURRENTLY ON EDGE ($(edge.orig.pos), $(edge.dest.pos))\n")
         if right_first
-            edge = joint.ccwd
-            println("CURRENTLY ON RIGHT EDGE ($(edge.orig.pos), $(edge.dest.pos))")
             if !weld_set && current_left_face == ll
-                next_weld_edge, weld_vertex = weldedges(joint, lr, ll, true)
+                next_weld_edge, weld_vertex = weldedges(joint, lr, ll, true, io=io)
                 finisher_right = true
                 weld_set = true
-                killface!(edge, joint, true)
+                killface!(edge, joint, true, io=io)
             elseif current_right_face == hr
-                nothing
-            else
-                killface!(edge, joint, true)
-            end
-            current_right_face = oppositeface(current_right_face, current_edge)
-        else
-            edge = joint.cwd
-            println("CURRENTLY ON LEFT EDGE ($(edge.orig.pos), $(edge.dest.pos))")
-            if !weld_set && current_right_face == lr
-                next_weld_edge, weld_vertex = weldedges(joint, lr, ll, false)
-                finisher_right = false
-                weld_set = true
-                killface!(edge, joint, false)
-            elseif current_left_face == hl
+                write(io, "HUASDUAHSODIHAOHDAOSDHAOIHD\n")
                 while true
                     hideedge(edge)
-                    println("KILLED (3): $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))")
-                    next_edge = ccwface(current_left_face, edge)
+                    write(io, "KILLED (3): $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))\n")
+                    next_edge = ccwface(hr, edge)
                     commonvertex(edge, next_edge).dead = true
                     if isboundaryedge(next_edge)
                         common_vertex = commonvertex(edge, next_edge)
-                        unstickedge(next_edge, common_vertex)
+                        unstickedge!(next_edge, common_vertex)
                         if common_vertex == next_edge.dest
                             next_edge.dest = upper_ray.dest
-                            squeezeedge!(upper_ray.dest, next_edge, next=upper_ray)
+                            write(io, "ASD\n")
                             next_edge.fr = hl
                         elseif common_vertex == next_edge.orig
                             next_edge.orig = upper_ray.dest
+                            write(io, "ASD2\n")
                             next_edge.fl = hl
-                            squeezeedge!(upper_ray.dest, next_edge, next=upper_ray)
                         end
+                        squeezeedge!(upper_ray.dest, next_edge, next=upper_ray)
                         break
                     end
                     edge = next_edge
                 end
             else
-                killface!(edge, joint, false)
+                killface!(edge, joint, true, io=io)
             end
-            current_left_face = oppositeface(current_left_face, current_edge)
+            current_right_face = oppositeface(current_right_face, current_edge, io=io)
+        else
+            if !weld_set && current_right_face == lr
+                next_weld_edge, weld_vertex = weldedges(joint, lr, ll, false, io=io)
+                finisher_right = false
+                weld_set = true
+                killface!(edge, joint, false, io=io)
+            elseif current_left_face == hl
+                while true
+                    hideedge(edge)
+                    write(io, "KILLED (3): $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))\n")
+                    next_edge = ccwface(hl, edge)
+                    commonvertex(edge, next_edge).dead = true
+                    if isboundaryedge(next_edge)
+                        common_vertex = commonvertex(edge, next_edge)
+                        unstickedge!(next_edge, common_vertex)
+                        if common_vertex == next_edge.dest
+                            next_edge.dest = upper_ray.dest
+                            next_edge.fr = hl
+                        elseif common_vertex == next_edge.orig
+                            next_edge.orig = upper_ray.dest
+                            next_edge.fl = hl
+                        end
+                        squeezeedge!(upper_ray.dest, next_edge, next=upper_ray)
+                        break
+                    end
+                    edge = next_edge
+                end
+            else
+                killface!(edge, joint, false, io=io)
+            end
+            current_left_face = oppositeface(current_left_face, current_edge, io=io)
         end
         current_vertex = current_split
     end
@@ -260,7 +289,7 @@ fixids!(a)
 # fixids!(b)
 checkdcel(a)
 checkdcel(b)
-test = mergevoronoi(a, b)
+test = mergevoronoi(a, b, true)
 checkdcel(test)
 
 ##
