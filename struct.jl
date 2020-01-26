@@ -42,9 +42,8 @@ mutable struct DCEL
     edgelist::Array
     vertexlist::Array
     facelist::Array
-    dummylist::Array
 end
-DCEL() = DCEL([], [], [], [])
+DCEL() = DCEL([], [], [])
 
 function printnothing(e::Any)::String
     p = String
@@ -121,7 +120,6 @@ end
 function createdummyvertex!(D::DCEL, u::Vertex, angle::Number)::Vertex
     vector = u.pos .+ [cos(angle),sin(angle)]
     v = createvertex!(D, vector, false)
-    push!(D.dummylist, v)
     return v
 end
 
@@ -176,6 +174,9 @@ function plotdcel(D::DCEL; faces::Bool=false, dead_edges::Bool=false, dead_verti
 end
 
 function checkdcel(D::DCEL)
+    for v in D.vertexlist
+        @assert v in endpoints(v.edge)
+    end
     for e in D.edgelist
         @assert cw(e.ccwo, e.orig) == e "ccwo->cwo $(e)"
         @assert ccw(e.cwo, e.orig) == e "cwo->ccwo $(e)"
@@ -186,9 +187,6 @@ function checkdcel(D::DCEL)
             @assert e.orig.original && !e.dest.original
         end
     end
-
-    pos_list = getfield.(D.vertexlist, :pos)
-
     for f in D.facelist
         edgesccw = faceedgesccw(f)
         edgescw = faceedgescw(f)
@@ -526,14 +524,21 @@ function faceverticesccw(f::Face)::Array
     return out
 end
 
+function firstlastdummy(D::DCEL)
+    v1 = findfirst(x -> !getfield(x, :original), D.vertexlist)
+    v2 = findlast(x -> !getfield(x, :original), D.vertexlist)
+    return isnothing(v1) ? (nothing, nothing) : (D.vertexlist[v1], D.vertexlist[v2])
+end
+
 function findinfiniteface(D::DCEL)::Union{Face,Nothing}
-    if isempty(D.dummylist)
+    v1, v2 = firstlastdummy(D)
+    if isnothing(v1)
         return nothing
     end
-    if length(D.dummylist) == 1
-        return D.dummylist[1].edge.fr
+    if v1 == v2
+        return v1.edge.fr
     else
-        v = D.dummylist[1]
+        v = v1
         edge = v.edge
         while !isboundaryedge(edge)
             edge = ccw(edge, v)
@@ -583,14 +588,14 @@ function resetfacelist!(a::DCEL, face::Face, new_face::Face)
 end
 
 function addray!(D::DCEL, u::Vertex, angle::Number, f::Union{Face,Nothing}=nothing, split_face::Bool=true)
-    l = length(D.dummylist)
+    v1, v2 = firstlastdummy(D)
     v = createdummyvertex!(D, u, angle)
     new_edge = nothing
-    if l <=1
+    if v1 == v2 #l <=1
         new_edge = joinvertices!(D, u, v)
-        if l == 1
-            outer = joinvertices!(D, D.dummylist[1], v)
-            joinvertices!(D, v, D.dummylist[1], po=outer, pd=getstrut(D.dummylist[1]))
+        if !isnothing(v1)
+            outer = joinvertices!(D, v1, v)
+            joinvertices!(D, v, v1, po=outer, pd=getstrut(v1))
         end
     else
         outeredge = nothing
@@ -801,7 +806,7 @@ function faceintersection(f::Face)
     end
 end
 
-function edgerayintersection(edge::Main.DStruct.Edge, q::Array, angle::Float64)::Array
+function edgerayintersection(edge::Edge, q::Array, angle::Float64, infinite::Bool=false)::Array
     p = edge.orig.pos
     r = (edge.dest.pos-p)/norm(edge.dest.pos-p)
     s = [cos(angle),sin(angle)]
@@ -810,25 +815,14 @@ function edgerayintersection(edge::Main.DStruct.Edge, q::Array, angle::Float64):
     t = cross2d(num, s)/den
     u = cross2d(num, r)/den
     if isstrutedge(edge)
-        return u>=0 && 0<=t #=&& cross2d(p-q, r) != 0=# ? p+t*r : [NaN,NaN]
+        return (u>=0 || infinite) && 0<=t ? p+t*r : [NaN,NaN]
     else
-        return u>=0 && 0<=t<=1 ? p+t*r #=&& cross2d(p-q, r) != 0=# : [NaN,NaN]
+        return (u>=0 || infinite) && 0<=t<=1 ? p+t*r : [NaN,NaN]
     end
     return
 end
 
-# function edgerayintersection(edge::Edge, start::Array, finish::Array)::Array
-#     p = edge.orig.pos
-#     r = (edge.dest.pos-p)/norm(edge.dest.pos-p)
-#     s = [cosatan(finish[2]-start[2],finish[1]-start[1]),sinatan(finish[2]-start[2],finish[1]-start[1])]
-#     num = start - p
-#     den = cross2d(r, s)
-#     t = cross2d(num, s)/den
-#     u = cross2d(num, r)/den
-#     return u>=0 && 0<=t<=1 ? p+t*r : [NaN,NaN]
-# end
-
-function facerayintersection(f::Face, start::Array, angle::Number, clockwise::Bool, ignore::Array=[]; io=stdout)
+function facerayintersection(f::Face, start::Array, angle::Number, clockwise::Bool; infinite::Bool=false, ignore::Array=[], io=stdout)
     starter_edge = f.edge
     edge = starter_edge
     write(io, "CHECKING INTERSECTION OF FACE $(f)\n")
@@ -836,8 +830,9 @@ function facerayintersection(f::Face, start::Array, angle::Number, clockwise::Bo
         write(io, "CHECKING EDGE $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))\n")
         write(io, "WITH LEFT FACE: $(edge.fl) AND RIGHT FACE: $(edge.fr)\n")
         if !isboundaryedge(edge) && !(edge in ignore)
-            inter = edgerayintersection(edge, start, angle)
+            inter = edgerayintersection(edge, start, angle, infinite)
             if !isnan(inter[1])
+                write(io, "INTERSECTED $(edge.id) ($(edge.orig.pos), $(edge.dest.pos)), at $inter\n")
                 return edge, inter
             end
         end
@@ -853,7 +848,7 @@ end
 
 function oppositeface(f::Face, e::Edge; io=stdout)::Face
     write(io, "CHECKING OPPOSITE FACE OF: $(f)\n")
-    write(io, "WITH MIRROR EDGE: $(e.orig.pos), $(e.dest.pos)\n")
+    write(io, "WITH MIRROR EDGE: $(e.id) ($(e.orig.pos), $(e.dest.pos))\n")
     write(io, "MIRROR RIGHT FACE: $(e.fr)\n")
     write(io, "MIRROR LEFT FACE: $(e.fl)\n")
     if e.fr.site == f.site
@@ -867,7 +862,6 @@ function oppositeface(f::Face, e::Edge; io=stdout)::Face
     end
     return
 end
-
 
 function mergeinfinitefaces!(a::DCEL, b::DCEL)
     fi = Face("i")
@@ -883,8 +877,7 @@ function joindcel(a::DCEL, b::DCEL)::DCEL
     vertexlist = vcat(a.vertexlist, b.vertexlist)
     edgelist = vcat(a.edgelist, b.edgelist)
     facelist = vcat(a.facelist, b.facelist)
-    dummylist = vcat(a.dummylist, b.dummylist)
-    return DCEL(edgelist, vertexlist, facelist, dummylist)
+    return DCEL(edgelist, vertexlist, facelist)
 end
 
 end

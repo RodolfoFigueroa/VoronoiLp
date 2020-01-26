@@ -80,6 +80,8 @@ function diagramintersection(ir::Array, il::Array, er::Union{Edge,Nothing}, el::
         starter_right = false
         split = createvertex!(D, il)
         s1, s2 = splitedge!(D, el, split)
+    else #sanity
+        throw("")
     end
     return starter_right, split, s1, s2
 end
@@ -131,7 +133,7 @@ end
 #When I wrote this, only God and I understood what I was doing.
 #Now, only God knows.
 function mergevoronoi(left::DCEL, right::DCEL, logging::Bool=false)
-    io = logging ? open("log.txt", "w") : stdout
+    global io = logging ? open("log.txt", "w") : stdout
     fi = mergeinfinitefaces!(left, right)
     global D = joindcel(left, right)
     push!(D.facelist, fi)
@@ -139,7 +141,9 @@ function mergevoronoi(left::DCEL, right::DCEL, logging::Bool=false)
     hr, lr = findextrema(right)
     angle = perpangle(hr, hl)
     write(io, "==INITIAL RAY HAS AN ANGLE: $(rad2deg(angle))==\n")
+    write(io, "CHECKING LEFT DIAGRAM\n")
     el, il = facerayintersection(hl, midpoint(hr, hl), angle, false, io=io)
+    write(io, "CHECKING LEFT DIAGRAM\n")
     er, ir = facerayintersection(hr, midpoint(hr, hl), angle, true, io=io)
     starter_right, split, s1, s2 = diagramintersection(ir, il, er, el, io=io)
 
@@ -243,12 +247,13 @@ end
 
 
 ##
-p = [[2,2],[1,1],[3,5]]
+# p = [[2,2],[1,1],[3,5]]
+# p = [rand(2), rand(2), rand(2)]
 q = [[3,3],[5,4],[6,2]]
 a = voronoithreepoints(p)
 b = voronoithreepoints(q)
 fixids!(a)
-# fixids!(b)
+fixids!(b)
 checkdcel(a)
 checkdcel(b)
 test = mergevoronoi(a, b, true)
