@@ -48,11 +48,10 @@ function killface!(edge::Edge, joint::Edge, right::Bool; io=stdout)
     return
 end
 
-function firstray!(split::Vertex, angle::Number, hr::Face, hl::Face, right::Bool; io=stdout)
+function firstray!(D::DCEL, split::Vertex, angle::Number, hr::Face, hl::Face, right::Bool; io=stdout)
     upper_ray = addray!(D, split, angle+pi, right ? hr : hl, false)
     write(io, "RAY HAS AN ORIGIN $(upper_ray.orig.pos)\n")
-    starter_edge = right ? ccw(upper_ray, split) : cw(upper_ray, split)
-    edge = starter_edge
+    edge = right ? ccw(upper_ray, split) : cw(upper_ray, split)
     while true
         hideedge(edge)
         write(io, "KILLED (2): $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))\n")
@@ -140,27 +139,30 @@ function mergevoronoi(left::DCEL, right::DCEL, logging::Bool=false)
     hl, ll = findextrema(left)
     hr, lr = findextrema(right)
     angle = perpangle(hr, hl)
-    write(io, "==INITIAL RAY HAS AN ANGLE: $(rad2deg(angle))==\n")
-    write(io, "CHECKING LEFT DIAGRAM\n")
-    el, il = facerayintersection(hl, midpoint(hr, hl), angle, false, io=io)
-    write(io, "CHECKING LEFT DIAGRAM\n")
-    er, ir = facerayintersection(hr, midpoint(hr, hl), angle, true, io=io)
+    m = midpoint(hr, hl)
+    write(io, "==INITIAL RAY HAS AN ANGLE: $(rad2deg(angle)) AND STARTS AT: $m\n")
+    write(io, "CHECKING LEFT DIAGRAM...\n")
+    el, il = facerayintersection(hl, m, angle, false, infinite=true, io=io)
+    write(io, "CHECKING RIGHT DIAGRAM...\n")
+    er, ir = facerayintersection(hr, m, angle, true, infinite=true, io=io)
     starter_right, split, s1, s2 = diagramintersection(ir, il, er, el, io=io)
 
     current_right_face = current_left_face = Face
     current_right_vertex = current_left_vertex = nothing
-    upper_ray = Edge
+    upper_ray = firstray!(D, split, angle, hr, hl, starter_right, io=io)
+    # addray()
     if starter_right
-        upper_ray = firstray!(split, angle, hr, hl, true, io=io)
+        write(io, "ASD\n")
         current_right_face = oppositeface(hr, upper_ray.cwo, io=io)
         current_left_face = hl
         current_right_vertex = split
     else
-        upper_ray = firstray!(split, angle, hr, hl, false, io=io)
+        write(io, "UPPER RAY: $upper_ray\n")
         current_right_face = hr
         current_left_face = oppositeface(hl, upper_ray.ccwo, io=io)
         current_left_vertex = split
     end
+    return D
     current_vertex = split
     weld_set = false
     weld_vertex = Vertex
@@ -195,12 +197,12 @@ function mergevoronoi(left::DCEL, right::DCEL, logging::Bool=false)
             return D
         end
         if current_right_face != lr
-            er, ir = facerayintersection(current_right_face, current_vertex.pos, angle, true, [s1,s2], io=io)
+            er, ir = facerayintersection(current_right_face, current_vertex.pos, angle, true, ignore=[s1,s2], io=io)
         else
             ir = [-Inf, -Inf]
         end
         if current_left_face != ll
-            el, il = facerayintersection(current_left_face, current_vertex.pos, angle, false, [s1,s2], io=io)
+            el, il = facerayintersection(current_left_face, current_vertex.pos, angle, false, ignore=[s1,s2], io=io)
         else
             il = [-Inf, -Inf]
         end
@@ -245,10 +247,9 @@ function mergevoronoi(left::DCEL, right::DCEL, logging::Bool=false)
     return
 end
 
-
 ##
 # p = [[2,2],[1,1],[3,5]]
-# p = [rand(2), rand(2), rand(2)]
+p = [[0.59,0.58],[0.32,0.92],[0.45,0.71]]
 q = [[3,3],[5,4],[6,2]]
 a = voronoithreepoints(p)
 b = voronoithreepoints(q)
@@ -256,9 +257,15 @@ fixids!(a)
 fixids!(b)
 checkdcel(a)
 checkdcel(b)
-test = mergevoronoi(a, b, true)
-checkdcel(test)
+# test = mergevoronoi(a, b, true)
+# checkdcel(test)
 
 ##
 plotdcel(test, ratio=:equal, sites=true, dead_edges=true, dead_vertices=false)
 # checkdcel(test)
+
+##
+splittest = createvertex!(a, [2.65, 2.48])
+splitedge!(a, a.edgelist[2], splittest)
+addray!(a, splittest, deg2rad(-56)+pi, a.facelist[4], false)
+plotdcel(a)

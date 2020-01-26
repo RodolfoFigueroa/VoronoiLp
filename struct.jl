@@ -2,7 +2,7 @@ module DStruct
 include("./vector.jl")
 import Base.show
 using Plots, Statistics, .DVector
-export DCEL, Vertex, Edge, Face, createvertex!, splitedge!, addray!, joinvertices!, voronoitwopoints, voronoithreepoints, fixids!, checkdcel, mergeinfinitefaces!, joindcel, findextrema, perpangle, midpoint, facerayintersection, ccw, cw, ccwface, cwface, hideedge, isboundaryedge, commonvertex, oppositeface, plotdcel, endpoints, unstickedge!, squeezeedge!, faceedgesccw, faceedgescw, settopology!
+export DCEL, Vertex, Edge, Face, createvertex!, splitedge!, addray!, joinvertices!, voronoitwopoints, voronoithreepoints, fixids!, checkdcel, mergeinfinitefaces!, joindcel, findextrema, perpangle, midpoint, facerayintersection, ccw, cw, ccwface, cwface, hideedge, isboundaryedge, commonvertex, oppositeface, plotdcel, endpoints, unstickedge!, squeezeedge!, faceedgesccw, faceedgescw, settopology!, bisectorangles
 
 mutable struct Vertex
     id::String
@@ -184,7 +184,7 @@ function checkdcel(D::DCEL)
         @assert ccw(e.cwd, e.dest) == e "cwd->ccwd $(e)"
         @assert e.orig != e.dest
         if isstrutedge(e)
-            @assert e.orig.original && !e.dest.original
+            @assert !e.dest.original
         end
     end
     for f in D.facelist
@@ -751,7 +751,7 @@ function voronoitwopoints(points::Array, p::Int=2)::DCEL
     return D
 end
 
-function voronoithreepoints(points::Array)::DCEL
+function voronoithreepoints2(points::Array)::DCEL
     u, v, w = points
     a, b, c = pointccw(points) ? bisectorangles(v, u, w) : bisectorangles(u, v, w)
     D = DCEL()
@@ -766,6 +766,26 @@ function voronoithreepoints(points::Array)::DCEL
     p.fl.site = v
     p.fr.site = w
     p.ccwo.fl.site = u
+    return D
+end
+
+function voronoithreepoints(points::Array)::DCEL
+    u, v, w = points
+    a, b, c = pointccw(points) ? bisectorangles(v, u, w) : bisectorangles(u, v, w) #somehow this works
+    D = DCEL()
+    m = createvertex!(D, circlethreepoints(u, v, w))
+    p = addray!(D, m, a)
+    r = addray!(D, m, c)
+    q = addray!(D, m, b, angleccw(a,b,c) ? p.fl : p.fr)
+    if pointccw(points)
+        p.fr.site = w
+        q.fr.site = v
+        r.fr.site = u
+    else
+        p.fl.site = v
+        q.fl.site = w
+        r.fl.site = u
+    end
     return D
 end
 
