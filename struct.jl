@@ -21,7 +21,7 @@ midpoint, bisectorangles,
 
 findextrema, findstruts, findsupport, leftofline,
 
-perpangle, hideedge, isframe, commonvertex, oppositeface, endpoints, unstickedge!,
+perpangle, hideedge!, isframe, commonvertex, oppositeface, endpoints, unstickedge!,
 
 voronoitwopoints, voronoithreepoints
 
@@ -134,7 +134,7 @@ function dot(u::Array, v::Array)::Float64
 end
 
 function norm(a::Array)::Float64
-    return sqrt(sum(a .^2))
+    return hypot(a...)
 end
 
 function distance(p::Array, q::Array)::Float64
@@ -180,7 +180,7 @@ end
 function circletwopointsradius(p::Array, q::Array, r::Number)
     x1, y1 = p
     x2, y2 = q
-    q = sqrt((x2-x1)^2 + (y2-y1)^2)
+	q = hypot(x2-x1, y2-y1)
     y3 = (y1+y2)/2
     x3 = (x1+x2)/2
     basex = sqrt(r^2 - (q/2)^2) * (y1-y2)/q
@@ -246,7 +246,7 @@ function plotdcel(D::DCEL; faces::Bool=false, dead_edges::Bool=false, dead_verti
     p = plot(leg=false)
     for v in D.vertexlist
         color = v.dead ? :gray : v.original ? :black : :red
-        if !v.dead || dead_vertices
+        if dead_vertices || !v.dead
             scatter!(p, [v.pos[1]], [v.pos[2]], series_annotations=[Plots.text("\nv$(v.id)"), :bottom], color=color, aspect_ratio=ratio)
         end
     end
@@ -254,7 +254,7 @@ function plotdcel(D::DCEL; faces::Bool=false, dead_edges::Bool=false, dead_verti
         bound = isframe(e)
         color = e.dead ? :gray : bound ? :red : :black
         ave = edgecenter(e)
-        if (!e.dead || dead_edges) && (!bound || bounds)
+        if (dead_edges || !e.dead) && (bounds || !bound)
             plot!(p, [e.orig.pos[1],e.dest.pos[1]], [e.orig.pos[2],e.dest.pos[2]], line=:arrow, annotations = (ave[1], ave[2], "e$(e.id)"), linecolor=color, aspect_ratio=ratio)
         end
     end
@@ -283,6 +283,7 @@ function checkdcel(D::DCEL)
         @assert e.orig != e.dest
         if isstrut(e)
             @assert !e.dest.original
+			@assert e.orig.original
         end
     end
     for f in D.facelist
@@ -301,11 +302,23 @@ function checkdcel(D::DCEL)
 end
 
 function cw(e::Edge, v::Vertex)::Edge
-    return v==e.orig ? e.cwo : e.cwd
+	if v == e.orig
+		return e.cwo
+	elseif v == e.dest
+		return e.cwd
+	else #sanity
+		throw("")
+	end
 end
 
 function ccw(e::Edge, v::Vertex)::Edge
-    return v==e.orig ? e.ccwo : e.ccwd
+	if v == e.orig
+		return e.ccwo
+	elseif v == e.dest
+		return e.ccwd
+	else #sanity
+		throw("")
+	end
 end
 
 function cwset!(e::Edge, v::Vertex, new_edge::Edge)::Nothing
@@ -397,15 +410,20 @@ function getstrut(v::Vertex)::Edge #TODO: add sanity
     return
 end
 
-function findstruts(f::Face)::Tuple #TODO: add sanity
-    edge = f.edge
-    while true
-        if isframe(edge)
-            return cwface(f, edge), ccwface(f, edge)
-        end
-        edge = ccwface(f, edge)
-    end
-    return
+function findframe(f::Face; dir::Symbol=:ccw)::Edge
+	edge = f.edge
+	while true
+		if isframe(edge)
+			return edge
+		end
+		edge = dir==:ccw ? ccwface(f, edge) : cwface(f, edge)
+	end
+	return
+end
+
+function findstruts(f::Face; dir::Symbol=:ccw)::Tuple #TODO: add sanity
+    edge = findframe(f)
+    return cwface(f, edge), ccwface(f, edge)
 end
 
 function normalizedummy(v::Vertex)::Array
@@ -698,7 +716,7 @@ function resetfacelist!(a::DCEL, face::Face, new_face::Face)
     return
 end
 
-function checkfacebounds(f::Face, edge::Union{Edge,Nothing}=nothing; dir::Symbol=:ccw)
+function getfaceframe(f::Face, edge::Union{Edge,Nothing}=nothing; dir::Symbol=:ccw)
     isnothing(edge) ? edge=f.edge : @assert f==edge.fr || f==edge.fl
     starting_edge = edge
     while true
@@ -736,7 +754,7 @@ function addray!(D::DCEL, u::Vertex, angle::Number, f::Union{Face,Nothing}=nothi
                 edge = ccw(edge, u)
             end
         else
-            outeredge = checkfacebounds(f)
+            outeredge = getfaceframe(f)
         end
         e1, e2 = splitedge!(D, outeredge, v)
         previous = ccwface(f, e1) == e2 ? e2 : e1
@@ -762,8 +780,8 @@ function vertexinface(v::Vertex, f::Face)
 end
 
 function checkedgefaces(e::Edge)
-    a = checkfacebounds(e.fl, e)
-    b = checkfacebounds(e.fr, e)
+    a = getfaceframe(e.fl, e)
+    b = getfaceframe(e.fr, e)
     if !isnothing(a)
         return a
     elseif !isnothing(b)
@@ -773,7 +791,7 @@ function checkedgefaces(e::Edge)
     end
 end
 
-function splitedge!(D::DCEL, e::Edge, split::Vertex)
+function splitedge!(D::DCEL, e::Edge, split::Vertex)::Array
     new_edge = Edge("$(e.id)b", split, e.dest)
     push!(D.edgelist, new_edge)
 
@@ -792,7 +810,7 @@ function splitedge!(D::DCEL, e::Edge, split::Vertex)
     e.dest.edge = new_edge
     e.dest = split
     e.cwd = e.ccwd = new_edge
-    return e, new_edge
+    return [e, new_edge]
 end
 
 function leftofline(a::Array, b::Array, c::Array)::Bool
@@ -828,7 +846,7 @@ function unstickedge!(e::Edge, v::Vertex)
     return
 end
 
-function hideedge(e::Edge)::Nothing
+function hideedge!(e::Edge)::Nothing
     e.dead = true
     if e.fr.edge == e
         e.fr.edge = e.ccwo
@@ -1005,20 +1023,6 @@ function rayrayintersection(a::Edge, b::Edge)
     return rayrayintersection(a.orig, b.orig, a.dest, b.dest)
 end
 
-function infinitefaceintersection(f1::Face, f2::Face)::Bool
-    a = findstruts(f1)
-    b = findstruts(f2)
-    counter = 0
-    for e1 in a, e2 in b
-        if !isnan(rayrayintersection(e1, e2)[1])
-            counter+=1
-            if counter>1
-                return false
-            end
-        end
-    end
-    return true
-end
 function rayrayintersection(p::Array, q::Array, a1::Float64, a2::Float64)::Array
     r = [cos(a1),sin(a1)]
     s = [cos(a2),sin(a2)]
@@ -1032,7 +1036,7 @@ function rayrayintersection(p::Array, q::Array, a1::Float64, a2::Float64)::Array
     return u>=0 && t>=0 ? p+t*r : [NaN,NaN]
 end
 
-function facerayintersection(f::Face, start::Array, angle::Number, clockwise::Bool; infinite::Bool=false, ignore::Array=[], io=stdout)::Tuple
+function facerayintersection(f::Face, start::Array, angle::Number; dir::Symbol=:ccw, infinite::Bool=false, ignore::Array=[], io=stdout)::Tuple
     starter_edge = f.edge
     edge = starter_edge
     write(io, "CHECKING INTERSECTION OF FACE $(f)\n")
@@ -1046,10 +1050,10 @@ function facerayintersection(f::Face, start::Array, angle::Number, clockwise::Bo
                 return edge, inter
             end
         end
-        next_edge = clockwise ? cwface(f,edge) : ccwface(f,edge)
+        next_edge = dir==:cw ? cwface(f,edge) : ccwface(f,edge)
         if next_edge == starter_edge || next_edge == edge
             write(io, "FOUND NO INTERSECTION\n")
-            return nothing, [-Inf,-Inf]
+            return nothing, [NaN, NaN]
         end
         edge = next_edge
     end
