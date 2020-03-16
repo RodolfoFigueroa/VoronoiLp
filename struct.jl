@@ -3,13 +3,13 @@ import Base.show
 using Plots, Statistics
 export DCEL, Vertex, Edge, Face,
 
-createvertex!, splitedge!, addray!, joinvertices!, #Constructors
+createvertex!, createdummyvertex!, splitedge!, addray!, joinvertices!, #Constructors
 
-squeezeedge!, settopology!, #Topology
+squeezeedge!, settopology!, cwset!, ccwset!, #Topology
 
-ccw, cw, ccwface, cwface, #Face and edge traversal
+ccw, cw, ccwface, cwface, nextedge, #Face and edge traversal
 
-faceedgesccw, faceedgescw, faceverticescw, faceverticesccw, #
+faceedges, faceverticescw, faceverticesccw, #
 
 mergeinfinitefaces!, joindcel, #
 
@@ -17,9 +17,9 @@ fixids!, checkdcel, plotdcel,
 
 facerayintersection, rayrayintersection, infinitefaceintersection,
 
-midpoint, bisectorangles,
+midpoint, bisectorangles, distance,
 
-findextrema, findstruts, findsupport, leftofline,
+findextrema, findstruts, findsupport, leftofline, findframe,
 
 perpangle, hideedge!, isframe, commonvertex, oppositeface, endpoints, unstickedge!,
 
@@ -141,6 +141,10 @@ function distance(p::Array, q::Array)::Float64
 	return norm(p .-q)
 end
 
+function distance(p::Vertex, q::Vertex)::Float64
+	return distance(p.pos, q.pos)
+end
+
 function cosatan(y::Number, x::Number)::Float64
     return x/hypot(x,y)
 end
@@ -203,7 +207,6 @@ function circlethreepoints(p::Face, q::Face, r::Face)
 end
 
 ##
-#
 function createvertex!(D::DCEL, pos::Array, original::Bool=true)::Vertex
     new_vertex = Vertex("$(length(D.vertexlist)+1)", pos, nothing, original)
     push!(D.vertexlist, new_vertex)
@@ -242,20 +245,40 @@ function fixids!(D::DCEL)::Nothing
     return
 end
 
-function plotdcel(D::DCEL; faces::Bool=false, dead_edges::Bool=false, dead_vertices::Bool=false, bounds::Bool=true, ratio::Any=:equal, sites::Bool=false)
+function plotdcel(D::DCEL; faces::Bool=false, dead_edges::Bool=false, dead_vertices::Bool=false, bounds::Bool=true, ratio::Any=:equal, sites::Bool=false, scale::Number=1)
     p = plot(leg=false)
     for v in D.vertexlist
-        color = v.dead ? :gray : v.original ? :black : :red
-        if dead_vertices || !v.dead
-            scatter!(p, [v.pos[1]], [v.pos[2]], series_annotations=[Plots.text("\nv$(v.id)"), :bottom], color=color, aspect_ratio=ratio)
+		if v.original
+			color = :black
+			pos = v.pos
+		else
+			color = :red
+			pos = normalizedummy(v)*(scale-1)+v.pos
+		end
+		if v.dead
+			color = :grey
+		end
+		if (dead_vertices || !v.dead) && (bounds || v.original)
+            scatter!(p, [pos[1]], [pos[2]], series_annotations=[Plots.text("\nv$(v.id)"), :bottom], color=color, aspect_ratio=ratio)
         end
     end
     for e in D.edgelist
+		start = finish = nothing
+		if isstrut(e)
+			start = e.orig.pos
+			finish = normalizedummy(e.dest)*(scale-1)+e.dest.pos
+		elseif isframe(e)
+			start = normalizedummy(e.orig)*(scale-1)+e.orig.pos
+			finish = normalizedummy(e.dest)*(scale-1)+e.dest.pos
+		else
+			start = e.orig.pos
+			finish = e.dest.pos
+		end
         bound = isframe(e)
         color = e.dead ? :gray : bound ? :red : :black
-        ave = edgecenter(e)
+        ave = (start+finish)/2
         if (dead_edges || !e.dead) && (bounds || !bound)
-            plot!(p, [e.orig.pos[1],e.dest.pos[1]], [e.orig.pos[2],e.dest.pos[2]], line=:arrow, annotations = (ave[1], ave[2], "e$(e.id)"), linecolor=color, aspect_ratio=ratio)
+            plot!(p, [start[1],finish[1]], [start[2],finish[2]], line=:arrow, annotations = (ave[1], ave[2], "e$(e.id)"), linecolor=color, aspect_ratio=ratio)
         end
     end
     for f in D.facelist
@@ -271,11 +294,13 @@ function plotdcel(D::DCEL; faces::Bool=false, dead_edges::Bool=false, dead_verti
     return p
 end
 
-function checkdcel(D::DCEL)
+function checkdcel(D::DCEL; io=stdout)
     for v in D.vertexlist
+		write(io, "Checking vertex: $v\n")
         @assert v in endpoints(v.edge)
     end
     for e in D.edgelist
+		write(io, "Checking edge: $e\n")
         @assert cw(e.ccwo, e.orig) == e "ccwo->cwo $(e)"
         @assert ccw(e.cwo, e.orig) == e "cwo->ccwo $(e)"
         @assert cw(e.ccwd, e.dest) == e "ccwd->cwd $(e)"
@@ -283,16 +308,13 @@ function checkdcel(D::DCEL)
         @assert e.orig != e.dest
         if isstrut(e)
             @assert !e.dest.original
-			@assert e.orig.original
         end
     end
     for f in D.facelist
-        edgesccw = faceedgesccw(f)
-        edgescw = faceedgescw(f)
+		write(io, "Checking face: $f\n")
+        edgesccw = faceedges(f, :ccw)
+        edgescw = faceedges(f, :cw)
         @assert isempty(setdiff(edgescw, edgesccw))
-        for e in edgescw
-            @assert f==e.fr || f==e.fl "$(f):$(e)"
-        end
         for e in edgesccw
             @assert f==e.fr || f==e.fl "$(f):$(e)"
         end
@@ -335,15 +357,15 @@ function endpoints(u::Edge)::Set
     return Set([u.orig, u.dest])
 end
 
-function edgeangle(u::Edge)::Float64
+function edgeangle(u::Edge)::Number
     return atan(u.dest.pos[2]-u.orig.pos[2], u.dest.pos[1]-u.orig.pos[1])
 end
 
-function pivotangle(u::Edge, p::Vertex)::Float64
+function pivotangle(u::Edge, p::Vertex)::Number
     return edgeangle(u) + (p==u.orig ? 0 : pi)
 end
 
-function returnempty(s::Set)
+function returnempty(s::Set)::Any
     return isempty(s) ? nothing : pop!(s)
 end
 
@@ -416,7 +438,8 @@ function findframe(f::Face; dir::Symbol=:ccw)::Edge
 		if isframe(edge)
 			return edge
 		end
-		edge = dir==:ccw ? ccwface(f, edge) : cwface(f, edge)
+		# edge = dir==:ccw ? ccwface(f, edge) : cwface(f, edge)
+		edge = nextedge(f, dir, edge)
 	end
 	return
 end
@@ -598,6 +621,7 @@ function ccwface(f::Face, edge::Union{Edge,Nothing}=nothing)::Edge
     return
 end
 
+
 function cwface(f::Face, edge::Union{Edge,Nothing}=nothing)::Edge
     if isnothing(edge)
         return f.edge
@@ -614,30 +638,30 @@ function cwface(f::Face, edge::Union{Edge,Nothing}=nothing)::Edge
     return
 end
 
-function faceedgesccw(f::Face)::Array
-    out = []
-    edge = f.edge
-    while true
-        push!(out, edge)
-        edge = ccwface(f, edge)
-        if edge == f.edge
-            break
-        end
-    end
-    return out
+function nextedge(f::Face, dir::Symbol, start::Union{Edge,Nothing}=nothing)
+	if dir == :ccw
+		return ccwface(f, start)
+	elseif dir == :cw
+		return cwface(f, start)
+	else
+		throw("")
+	end
+	return
 end
 
-function faceedgescw(f::Face)::Array
-    out = []
-    edge = f.edge
-    while true
-        push!(out, edge)
-        edge = cwface(f, edge)
-        if edge == f.edge
-            break
-        end
-    end
-    return out
+function faceedges(f::Face, dir::Symbol, edge::Union{Edge,Nothing}=nothing)
+	if isnothing(edge)
+		edge = f.edge
+	end
+	out = []
+	while true
+		push!(out, edge)
+		edge = nextedge(f, dir, edge)
+		if edge == f.edge
+			break
+		end
+	end
+	return out
 end
 
 function faceverticesccw(f::Face)::Array
@@ -700,7 +724,7 @@ function deleteedge!(D::DCEL, e::Edge, merge_faces::Bool=true)::Nothing
 end
 
 function resetface(face::Face, new_face::Face)
-    for e in faceedgesccw(face)
+    for e in faceedges(face, :ccw)
         if e.fr == face
             e.fr = new_face
         else
@@ -723,7 +747,8 @@ function getfaceframe(f::Face, edge::Union{Edge,Nothing}=nothing; dir::Symbol=:c
         if isframe(edge)
             return edge
         end
-        edge = dir==:ccw ? ccwface(f,edge) : cwface(f,edge)
+        # edge = dir==:ccw ? ccwface(f,edge) : cwface(f,edge)
+		edge = nextedge(f, dir, edge)
         if edge == starting_edge
             return nothing
         end
@@ -1039,18 +1064,18 @@ end
 function facerayintersection(f::Face, start::Array, angle::Number; dir::Symbol=:ccw, infinite::Bool=false, ignore::Array=[], io=stdout)::Tuple
     starter_edge = f.edge
     edge = starter_edge
-    write(io, "CHECKING INTERSECTION OF FACE $(f)\n")
+    write(io, "\nCHECKING INTERSECTION OF FACE $(f)\n")
     while true
         write(io, "CHECKING EDGE $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))\n")
         write(io, "WITH LEFT FACE: $(edge.fl) AND RIGHT FACE: $(edge.fr)\n")
-        if !isframe(edge) && !(edge in ignore)
+        if !edge.dead && !isframe(edge) && !(edge in ignore)
             inter = edgerayintersection(edge, start, angle, infinite)
             if !isnan(inter[1])
                 write(io, "INTERSECTED $(edge.id) ($(edge.orig.pos), $(edge.dest.pos)), at $inter\n")
                 return edge, inter
             end
         end
-        next_edge = dir==:cw ? cwface(f,edge) : ccwface(f,edge)
+        next_edge = nextedge(f, dir, edge)
         if next_edge == starter_edge || next_edge == edge
             write(io, "FOUND NO INTERSECTION\n")
             return nothing, [NaN, NaN]
