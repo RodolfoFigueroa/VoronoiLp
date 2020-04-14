@@ -6,7 +6,7 @@ using Plots
 using Statistics
 
 ##
-function voronoi(points::Array; io=stdout)
+function voronoi(points::Array, io)
     if length(points) == 2
         return voronoitwopoints(points)
     elseif length(points) == 3
@@ -15,8 +15,8 @@ function voronoi(points::Array; io=stdout)
         split = Int(floor(length(points)/2))
         points_left = points[1:split]
         points_right = points[split+1:end]
-        vor_left = voronoi(points_left)
-        vor_right = voronoi(points_right)
+        vor_left = voronoi(points_left, io)
+        vor_right = voronoi(points_right, io)
         vor = mergevoronoi(vor_left, vor_right, io)
         return vor
     end
@@ -25,8 +25,9 @@ end
 
 function voronoihelper(points::Array; io=stdout)
     points = sort(points, by=x->x[1])
-    write(io, "POINTS: $points\n")
-    return voronoi(points, io=io)
+    writenothing(io, "POINTS: $points\n")
+    out = voronoi(points, io)
+    return
 end
 
 function mergevoronoi(left::DCEL, right::DCEL, io)
@@ -35,8 +36,8 @@ function mergevoronoi(left::DCEL, right::DCEL, io)
     fixids!(D)
     push!(D.facelist, fi)
     hl, hr, ll, lr = findextrema(left, right)
-    write(io, "TOP FACES: ($hl, $hr)\n")
-    write(io, "BOT FACES: ($ll, $lr)\n")
+    writenothing(io, "TOP FACES: ($hl, $hr)\n")
+    writenothing(io, "BOT FACES: ($ll, $lr)\n")
 
     tl, tr, bl, br = openface.([hl, hr, ll, lr], [:ccw, :cw, :cw, :ccw], io=io)
     starter_left = getfield(tl[1], tl[2])
@@ -103,20 +104,24 @@ file = open("log.txt", "w")
 #  [0.25152768290667016, 0.38248434741059745],
 #  [0.2841969985654731, 0.8829357507003006],
 #  [0.7369629388643844, 0.6420969230393154]]
-points = temp
-# points = [rand(2) for i in 1:6]
 # points = temp
+# points = [rand(2) for i in 1:6]
+points = [[1,1], [3,2], [4,5], [7,2], [5,3]]
 test = voronoihelper(points, io=file)
 close(file)
 checkdcel(D, io=nothing)
 ##
-for i in 1:500
+for i in 1:10
     file = open("$i.txt", "w")
-    points = [rand(2) for i in 1:6]
-    test = voronoihelper(points, io=file)
+
+
     close(file)
     checkdcel(test, io=nothing)
-    plotdcel(D)
+    plotdcel(D, size=(2000,2000), labels=false, line=:line)
     savefig("$i.png")
 end
 # plotdcel(test)
+
+##
+points = [rand(2) for i in 1:1000]
+@time test = voronoihelper(points, io=nothing)
