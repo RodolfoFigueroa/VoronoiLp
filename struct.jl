@@ -105,7 +105,7 @@ function printnothing(e::Any)::String
 end
 
 function show(io::IO, v::Vertex)::Nothing
-    print(io, "v$(v.id): e=", printnothing(v.edge))
+	    print(io, "v$(v.id): e=", printnothing(v.edge))
     print(io, " pos=$(v.pos) orig=$(v.original)")
     return
 end
@@ -252,7 +252,6 @@ function createfloatingedge!(D::DCEL)
 	u = Vertex("x")
 	v = Vertex("y")
 	e = joinvertices!(D, u, v)
-	println("CREATED $e")
 	settopology!(e, cwd=e, ccwd=e, cwo=e, ccwo=e)
 	return e
 end
@@ -348,15 +347,15 @@ end
 
 function checkdcel(D::DCEL; io=stdout)
     for v in D.vertexlist
-		write(io, "Checking vertex: $v\n")
+		if !isnothing(io) write(io, "Checking vertex: $v\n") end
         @assert v in endpoints(v.edge)
     end
     for e in D.edgelist
-		write(io, "Checking edge: $e\n")
+		if !isnothing(io) write(io, "Checking edge: $e\n") end
         checkedge(e)
     end
     for f in D.facelist
-		write(io, "Checking face: $f\n")
+		if !isnothing(io) write(io, "Checking face: $f\n") end
         edgesccw = faceedges(f, :ccw)
         edgescw = faceedges(f, :cw)
         @assert isempty(setdiff(edgescw, edgesccw))
@@ -1103,22 +1102,21 @@ function faceintersection(f::Face)
             return false
         end
     end
+	return
 end
 
-function edgerayintersection(edge::Edge, q::Array, angle::Float64, infinite::Bool=false)::Array
+function edgerayintersection(edge::Edge, q::Array, angle::Float64, infinite::Bool=false; io=stdout)::Array
     p = edge.orig.pos
-    r = (edge.dest.pos-p)/norm(edge.dest.pos-p)
-    s = [cos(angle),sin(angle)]
+    r = edge.dest.pos - p
+    s = [cos(angle), sin(angle)]
     num = q - p
     den = cross2d(r, s)
     t = cross2d(num, s)/den
     u = cross2d(num, r)/den
-    if isstrut(edge)
-        return (u>=0 || infinite) && 0<=t ? p+t*r : [NaN,NaN]
-    else
-        return (u>=0 || infinite) && 0<=t<=1 ? p+t*r : [NaN,NaN]
-    end
-    return
+	write(io, "t = $t\nu = $u\n")
+	cond = isstrut(edge) ? 0<=t : 0<=t<=1
+	write(io, "$(u>=0), STRUT: $(isstrut(edge)) AND $cond\n")
+	return (u>=0 || infinite) && cond ? p+t*r : [NaN,NaN]
 end
 
 function rayrayintersection(p::Array, q::Array, v::Array, w::Array)::Array
@@ -1160,13 +1158,14 @@ end
 function facerayintersection(f::Face, start::Array, angle::Number, edge::Edge; dir::Symbol=:ccw, infinite::Bool=false, ignore::Array=[], io=stdout)::Tuple
 	start_vertices = endpoints(edge)
 	counter = 0
-    write(io, "CHECKING INTERSECTION OF FACE $(f)\n")
+    write(io, "CHECKING INTERSECTION OF FACE $(f) WITH IGNORE $(getfield.(ignore, :id))\n")
     while true
         write(io, "CHECKING EDGE $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))\n")
         if !edge.dead && !isframe(edge) && !(edge in ignore)
-            inter = edgerayintersection(edge, start, angle, infinite)
+            inter = edgerayintersection(edge, start, angle, infinite, io=io)
+			write(io, "INTERSECTION: $inter\n")
             if !isnan(inter[1])
-                write(io, "INTERSECTED $(edge.id) ($(edge.orig.pos), $(edge.dest.pos)), at $inter\n")
+                write(io, "INTERSECTED $(edge.id) ($(edge.orig.pos), $(edge.dest.pos)), AT $inter\n")
                 return edge, inter
             end
         end
@@ -1237,6 +1236,7 @@ function highestintersection(D::DCEL, handler::Handler, temp::Bool=false; io=std
 		right_starter_edge = findedge(handler.right_vertex, handler.right_face, :cw)
     end
     angle = perpangle(handler.right_face, handler.left_face)
+	write(io, "\nCHECKING INTERSECTION OF DIAGRAMS WITH RAY\nSTART: $start\nANGLE: $(rad2deg(angle))\nIGNORE: $(handler.ignore)\n")
     write(io, "\nCHECKING LEFT DIAGRAM...\n")
     el, il = facerayintersection(handler.left_face, start, angle, left_starter_edge, dir=:ccw, infinite=infinite, ignore=handler.ignore, io=io)
     write(io, "\nCHECKING RIGHT DIAGRAM...\n")
@@ -1348,8 +1348,9 @@ function updateray!(D::DCEL, ray::Edge, u::Vertex, left::Face, right::Face)
 end
 
 function weldboundary(D::DCEL, t::Tuple, ray::Edge, side::Symbol; io=stdout)
-	write(io, "WELDING $(t[1])")
+	write(io, "WELDING $(t[1]) to $ray\n")
 	v = ray.dest
+	getfield(t[1], t[2]).dead = true
 	unstickedge!(t[1], t[2])
 	setfield!(t[1], t[2], v)
 	if ray.ccwd == ray

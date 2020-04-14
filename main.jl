@@ -6,8 +6,7 @@ using Plots
 using Statistics
 
 ##
-function voronoi(start_points::Array, io=stdout)
-    points = sort(start_points, by=x->x[1])
+function voronoi(points::Array; io=stdout)
     if length(points) == 2
         return voronoitwopoints(points)
     elseif length(points) == 3
@@ -18,13 +17,16 @@ function voronoi(start_points::Array, io=stdout)
         points_right = points[split+1:end]
         vor_left = voronoi(points_left)
         vor_right = voronoi(points_right)
-        # return points_left, points_right
-
-        # return vor_left, vor_right
         vor = mergevoronoi(vor_left, vor_right, io)
         return vor
     end
     return
+end
+
+function voronoihelper(points::Array; io=stdout)
+    points = sort(points, by=x->x[1])
+    write(io, "POINTS: $points\n")
+    return voronoi(points, io=io)
 end
 
 function mergevoronoi(left::DCEL, right::DCEL, io)
@@ -54,29 +56,18 @@ function mergevoronoi(left::DCEL, right::DCEL, io)
     weldboundary(D, t, top_ray, right_first, io=io)
     updateray!(D, top_ray, split, hl, hr)
     updatehandler!(handler, edge, split, right_first, starter_left, starter_right, io=io)
-    handler.ignore = [] #s
+    handler.ignore = s
     handler.current_joint = top_ray
-    bottom_vertex = nothing
     counter = 0
+    # return
     while handler.left_face != ll || handler.right_face != lr
-        write(io, "\n%%%TOP METHOD%%%\n")
         old_left_face = handler.left_face
         old_right_face = handler.right_face
         foobar(D, handler, false, io=io)
-        old_side = handler.side
-        println(old_side)
-        println(old_left_face)
-        println(old_right_face)
-        if old_side == :left
-            if old_left_face == hl
-                println("T1")
-                weldboundary(D, tl, top_ray, :left, io=io)
-            end
-        else
-            if old_right_face == hr
-                println("T3")
-                weldboundary(D, tr, top_ray, :right, io=io)
-            end
+        if handler.side == :left && old_left_face == hl
+            weldboundary(D, tl, top_ray, :left, io=io)
+        elseif handler.side == :right && old_right_face == hr
+            weldboundary(D, tr, top_ray, :right, io=io)
         end
 
         counter += 1
@@ -84,17 +75,16 @@ function mergevoronoi(left::DCEL, right::DCEL, io)
             # return
         end
     end
-    weldboundary(D, bl, bot_ray, :right)
+    weldboundary(D, bl, bot_ray, :right, io=io)
     updateray!(D, bot_ray, handler.current_vertex, lr, ll)
-    weldboundary(D, br, bot_ray, :left)
+    weldboundary(D, br, bot_ray, :left, io=io)
     if handler.side == :left
         squeezeedge!(handler.current_vertex, bot_ray, false, previous=handler.current_joint.ccwd, next=handler.current_joint)
     else
-        # settopology!(bot_ray, cwo=handler.current_joint, ccwo=handler.current_joint.cwd)
         squeezeedge!(handler.current_vertex, bot_ray, false, next=handler.current_joint.cwd, previous=handler.current_joint)
     end
-    fi.edge = bot_ray.ccwd
 
+    fi.edge = tl[1]
     hl.edge = tl[1]
     hr.edge = tr[1]
     ll.edge = bl[1]
@@ -102,12 +92,11 @@ function mergevoronoi(left::DCEL, right::DCEL, io)
 
     filter!(x->!getfield(x, :dead), D.edgelist)
     filter!(x->!getfield(x, :dead), D.vertexlist)
-    fixids!(D)
+    # fixids!(D)
     return D
 end
 ##
 file = open("log.txt", "w")
-# points = temp
 # points = [[0.14398304177257648, 0.3135285454600225],
 #  [0.14976778967492743, 0.4589056757755534],
 #  [0.20297895300489732, 0.5085108793774618],
@@ -116,16 +105,18 @@ file = open("log.txt", "w")
 #  [0.7369629388643844, 0.6420969230393154]]
 points = [[1,1], [2,2], [3,5], [3,3], [5,4], [6,2]]
 # points = [rand(2) for i in 1:6]
-test = voronoi(points, file)
+# points = temp
+test = voronoihelper(points, io=file)
 close(file)
-checkdcel(D)
-
+checkdcel(D, io=nothing)
 ##
 for i in 1:500
-    global file = open("log.txt", "w")
-    global points = [rand(2) for i in 1:6]
-    test = voronoi(points, file)
+    file = open("$i.txt", "w")
+    points = [rand(2) for i in 1:6]
+    test = voronoihelper(points, io=file)
     close(file)
-    checkdcel(test)
+    checkdcel(test, io=nothing)
+    plotdcel(D)
+    savefig("$i.png")
 end
 # plotdcel(test)
