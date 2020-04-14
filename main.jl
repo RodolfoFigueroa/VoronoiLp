@@ -64,7 +64,7 @@ function mergevoronoi(left::DCEL, right::DCEL, io)
         old_left_face = handler.left_face
         old_right_face = handler.right_face
         foobar(D, handler, false, io=io)
-        if handler.side == :left && old_left_face == hl
+        if handler.side == :left && old_left_face == hl #by some miracle this also works for the degenerate case
             weldboundary(D, tl, top_ray, :left, io=io)
         elseif handler.side == :right && old_right_face == hr
             weldboundary(D, tr, top_ray, :right, io=io)
@@ -92,7 +92,7 @@ function mergevoronoi(left::DCEL, right::DCEL, io)
 
     filter!(x->!getfield(x, :dead), D.edgelist)
     filter!(x->!getfield(x, :dead), D.vertexlist)
-    # fixids!(D)
+    fixids!(D)
     return D
 end
 ##
@@ -103,7 +103,7 @@ file = open("log.txt", "w")
 #  [0.25152768290667016, 0.38248434741059745],
 #  [0.2841969985654731, 0.8829357507003006],
 #  [0.7369629388643844, 0.6420969230393154]]
-points = [[1,1], [2,2], [3,5], [3,3], [5,4], [6,2]]
+points = temp
 # points = [rand(2) for i in 1:6]
 # points = temp
 test = voronoihelper(points, io=file)
