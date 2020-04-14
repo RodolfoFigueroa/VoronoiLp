@@ -27,7 +27,7 @@ function voronoihelper(points::Array; io=stdout)
     points = sort(points, by=x->x[1])
     writenothing(io, "POINTS: $points\n")
     out = voronoi(points, io)
-    return
+    return out
 end
 
 function mergevoronoi(left::DCEL, right::DCEL, io)
@@ -123,5 +123,5 @@ end
 # plotdcel(test)
 
 ##
-points = [rand(2) for i in 1:1000]
+points = [rand(2) for i in 1:100]
 @time test = voronoihelper(points, io=nothing)

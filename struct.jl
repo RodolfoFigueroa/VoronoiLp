@@ -707,7 +707,6 @@ function faceedges(f::Face, dir::Symbol, edge::Union{Edge,Nothing}=nothing)
 	end
 	out = []
 	while true
-		# println("PUSHED $edge")
 		push!(out, edge)
 		edge = nextedge(f, dir, edge)
 		if edge == f.edge
@@ -813,7 +812,6 @@ function getfaceframe(f::Face, edge::Union{Edge,Nothing}=nothing; dir::Symbol=:c
         if isframe(edge)
             return edge
         end
-        # edge = dir==:ccw ? ccwface(f,edge) : cwface(f,edge)
 		edge = nextedge(f, dir, edge)
         if edge == starting_edge
             return nothing
@@ -1089,17 +1087,6 @@ function bisector(f1::Face, f2::Face)
     return D
 end
 
-function faceintersection(f::Face)
-    edge = f.edge
-    while true
-        edge = ccwface(f, edge)
-        if edge == f.edge
-            return false
-        end
-    end
-	return
-end
-
 function edgerayintersection(edge::Edge, q::Array, angle::Float64, infinite::Bool=false; io=stdout)::Array
     p = edge.orig.pos
     r = edge.dest.pos - p
@@ -1273,6 +1260,7 @@ function killface!(face::Face, edge::Edge, dir::Symbol, stop_vertex::Union{Verte
 		writenothing(io, "KILLED VERTEX: $v\n")
         edge = next_edge
     end
+	writenothing(io, "STOPPED AT: $stop_vertex\n")
     return
 end
 
