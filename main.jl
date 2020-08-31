@@ -1,11 +1,11 @@
-##
+#---
 using Revise
 includet("./struct.jl")
 using .DStruct
 using Plots
 using Statistics
 
-##
+#---
 function mergevoronoi(left::DCEL, right::DCEL, io)
     fi = mergeinfinitefaces!(left, right)
     global D = joindcel(left, right)
@@ -95,7 +95,7 @@ end
 
 
 
-##
+#---
 file = open("log.txt", "w")
 # points = [[0.14398304177257648, 0.3135285454600225],
 #  [0.14976778967492743, 0.4589056757755534],
@@ -109,7 +109,7 @@ points = [[1,1], [2,2], [3,5], [3,3], [5,4], [6,2]]
 @time test = voronoihelper(points, io=file)
 close(file)
 # checkdcel(test, io=nothing)
-##
+#---
 for i in 1:10
     print(i)
     file = open("$i.txt", "w")
@@ -123,18 +123,5 @@ end
 # plotdcel(test)
 
 ##
-points = [rand(2) for i in 1:200]
-@profiler test = voronoihelper(points, io=nothing)
-
-##
-@benchmark intersect(Set([Vertex("1"), Vertex("2")]), Set([Vertex("1"), Vertex("2")]))
-
-##
-@benchmark intersect([Vertex("1"), Vertex("2")], [Vertex("1"), Vertex("2")])
-
-
-##
-@benchmark intersect((Vertex("1"), Vertex("2")), (Vertex("1"), Vertex("2")))
-
-##
-tangentvector([0,0], 2)
+t = fullcircle(3.0, 0.01)
+scatter(t[:,1], t[:,2])

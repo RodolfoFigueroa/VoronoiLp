@@ -299,7 +299,7 @@ end
 # end
 
 function isframe(e::Edge)::Bool
-	return any(x->isnothing(getfield(x, :site)))
+	return any(isnothing.(getfield.(faces(e), :site)))
 end
 
 function isstrut(e::Edge)::Bool
@@ -1222,7 +1222,7 @@ function updatehandler!(handler::Handler, edge::Edge, new_vertex::Vertex, side::
         handler.left_face = oppositeface(handler.left_face, edge, io=io)
         handler.left_vertex = new_vertex
     else
-        throw("")
+        throw("updatehandler: Side isn't ")
     end
     handler.current_vertex = new_vertex
     handler.side = side
@@ -1231,8 +1231,8 @@ function updatehandler!(handler::Handler, edge::Edge, new_vertex::Vertex, side::
 end
 
 function foobar(D::DCEL, handler::Handler;
-	stop_left::Union{Vertex,Nothing}=handler.left_vertex,
-	stop_right::Union{Vertex,Nothing}=handler.right_vertex, io=stdout)::Nothing
+	stop_left::Union{Vertex,Nothing} = handler.left_vertex,
+	stop_right::Union{Vertex,Nothing} = handler.right_vertex, io=stdout)::Nothing
 	right_first, split, s = highestintersection(D, handler, io=io)
     joint = joinvertices!(D, handler.current_vertex, split, false, update_edges=false)
 	split.edge = joint
@@ -1345,8 +1345,8 @@ function pointoncircle(start_point::Array, p::Float64, e::Float64=1e-6)::Array
 end
 
 function tangentvector(a::Array, p::Float64)::Array
-	x = cosatan(a[1]^(p-1), a[2]^(p-1))
-	y = -sinatan(a[1]^(p-1), a[2]^(p-1))
+	x = -cosatan(a[1]^(p-1), a[2]^(p-1))
+	y = sinatan(a[1]^(p-1), a[2]^(p-1))
 	return [x y]
 end
 
@@ -1359,8 +1359,8 @@ end
 
 function quartercircle(p::Float64, step::Float64, e::Float64=1e-6)
 	points = Array{Float64}(undef, (0,2))
-	start_point = [0.0 1.0]
-	while start_point[2] >= 0 && start_point[1] <= 1
+	start_point = [1.0 0.0]
+	while start_point[1] >= 0 && start_point[2] <= 1
 		points = vcat(points, start_point)
 		start_point = nextpoint(start_point, p, step, e)
 	end
@@ -1369,8 +1369,8 @@ end
 
 function fullcircle(p::Float64, step::Float64, e::Float64=1e-6)
 	prev_quarter = quartercircle(p, step, e)
-	circle = prev_quarter
-	for i in 1:3
+	circle = Array{Float64}(undef,(0,2))
+	for i in 1:4
 		next_quarter = hcat(-prev_quarter[:,2], prev_quarter[:,1])
 		circle = vcat(circle, next_quarter)
 		prev_quarter = next_quarter
