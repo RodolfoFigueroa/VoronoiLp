@@ -479,13 +479,13 @@ end
 
 
 function cwset!(e::Edge, v::Vertex, new_edge::Edge)::Nothing
-    v==e.orig ? e.cwo=new_edge : e.cwd=new_edge
+    v==e.orig ? settopology!(e, cwo=new_edge) : settopology!(e, cwd=new_edge)
     return
 end
 
 
 function ccwset!(e::Edge, v::Vertex, new_edge::Edge)::Nothing
-    v==e.orig ? e.ccwo=new_edge : e.ccwd=new_edge
+    v==e.orig ? settopology!(e, ccwo=new_edge) : settopology!(e, ccwd=new_edge)
     return
 end
 
