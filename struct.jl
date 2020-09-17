@@ -31,9 +31,11 @@ perpangle, isframe, commonvertex, oppositeface, endpoints, unstickedge!,
 
 voronoitwopoints, voronoithreepoints, #Elementary diagrams
 
-openface, foobar, highestintersection, updatehandler!, weldboundary, updateray!, writenothing, cleardcel!,
+openface, highestintersection, updatehandler!, weldboundary, updateray!, writenothing, cleardcel!,
 
-averagepositions, sorted_ccw, uncommonvertices, sorted_ccw_1, sorted_ccw_2
+averagepositions, sorted_ccw, uncommonvertices,
+
+voronoihelper
 
 #---
 #Struct
@@ -53,9 +55,10 @@ mutable struct Face
     id::String
     edge
     site::Union{Array,Nothing}
+    dead::Bool
 end
-Face(id)::Face = Face(id, nothing, nothing)
-Face(id, edge)::Face = Face(id, edge, nothing)
+Face(id)::Face = Face(id, nothing, nothing, false)
+Face(id, edge)::Face = Face(id, edge, nothing, false)
 
 
 mutable struct Edge
@@ -89,10 +92,10 @@ mutable struct Handler
     right_vertex::Union{Vertex,Nothing}
     current_vertex::Union{Vertex,Nothing}
     current_joint::Union{Edge,Nothing}
-    side::Union{Symbol,Nothing}
+    rightside::Bool
     ignore::Array
 end
-Handler(lf::Face, rf::Face, lv::Vertex, rv::Vertex)::Handler = Handler(lf, rf, lv, rv, nothing, nothing, nothing, [])
+Handler(lf::Face, rf::Face, lv::Vertex, rv::Vertex)::Handler = Handler(lf, rf, lv, rv, nothing, nothing, true, [])
 
 
 
@@ -473,8 +476,13 @@ end
 
 
 function nextpivot(e::Edge, v::Vertex, side::Symbol)::Edge
-	@assert side in [:cw,:ccw]
-	return getfield(Main, side)(e, v)
+    # return getfield(Main, side)(e, v)
+    if side == :cw
+        return cw(e, v)
+    else
+        return ccw(e,v)
+    end
+    return
 end
 
 
@@ -490,8 +498,8 @@ function ccwset!(e::Edge, v::Vertex, new_edge::Edge)::Nothing
 end
 
 
-@inline function endpoints(u::Edge)::Array
-    return [u.orig, u.dest]
+@inline function endpoints(u::Edge)::Tuple
+    return u.orig, u.dest
 end
 
 
@@ -563,7 +571,7 @@ function sorted_ccw_1(u::Edge, v::Edge, w::Edge)::Bool
 end
 
 
-function sorted_ccw_2(u::Edge, v::Edge, w::Edge)::Bool
+function sorted_ccw(u::Edge, v::Edge, w::Edge)::Bool
     a, b, c, p = getfield.(uncommonvertices(u, v, w), :pos)
     a = a - p
     b = b - p
@@ -572,9 +580,9 @@ function sorted_ccw_2(u::Edge, v::Edge, w::Edge)::Bool
 end
 
 
-function sorted_ccw(u::Edge, v::Edge, w::Edge)::Bool #TODO: Compare
-    return sorted_ccw_2(u, v, w)
-end
+# function sorted_ccw(u::Edge, v::Edge, w::Edge)::Bool #TODO: Compare
+#     return sorted_ccw_2(u, v, w)
+# end
 
 function settopology!(e::Edge; orig::Union{Vertex,Nothing}=nothing,
 	dest::Union{Vertex,Nothing}=nothing, cwo::Union{Edge,Nothing}=nothing,
@@ -632,7 +640,7 @@ vertexccw(vertices::Array) = pointccw(getfield.(vertices, :pos))
 
 function isframe(e::Edge)::Bool
     # return all(.!endfield(e, :original))
-	return !e.orig.original  && !e.dest.original
+	return !e.orig.original && !e.dest.original
 end
 
 
@@ -719,7 +727,9 @@ edgelength(e::Edge) = norm(mean(endfield(e, :pos)))::Float64
 edgemidpoint(e::Edge) = mean(endfield(e, :pos))::Array
 
 
-function joinvertices!(D::DCEL, u::Vertex, v::Vertex; po::Union{Edge,Nothing}=nothing, pd::Union{Edge,Nothing}=nothing, no::Union{Edge,Nothing}=nothing, nd::Union{Edge,Nothing}=nothing, split_face::Bool=true, update_edges::Bool=true)
+function joinvertices!(D::DCEL, u::Vertex, v::Vertex; po::Union{Edge,Nothing}=nothing, 
+    pd::Union{Edge,Nothing}=nothing, no::Union{Edge,Nothing}=nothing, 
+    nd::Union{Edge,Nothing}=nothing, split_face::Bool=true, update_edges::Bool=true)
     @assert u != v "Cannot join a vertex to itself"
     new_edge = createedge!(D, u, v)
     squeezeedge!(u, new_edge, previous=po, next=no)
@@ -768,8 +778,10 @@ function joinvertices!(D::DCEL, u::Vertex, v::Vertex; po::Union{Edge,Nothing}=no
         if !isnothing(f) && !isnothing(f.site)
             leftofedge(new_edge, f.site) ? new_edge.fl.site = f.site : new_edge.fr.site = f.site
         end
-
-        filter!(x->x != f, D.facelist)
+        
+        if !isnothing(f)
+            fooface(D, f)
+        end
         push!(D.facelist, f1, f2)
     end
     return new_edge
@@ -780,10 +792,9 @@ function cwface(f::Face, edge::Union{Edge,Nothing}=nothing)::Edge
     if isnothing(edge)
         return f.edge
     end
-	# println("CURRENTLY AT $edge")
-    if edge.fr == edge.fl
-        return edge.ccwo != edge ? edge.ccwo : edge.ccwd
-    elseif f == edge.fr
+    # if edge.fr == edge.fl
+    #     return edge.ccwo != edge ? edge.ccwo : edge.ccwd
+    if f == edge.fr
 		# println("JUMPED TO: $(edge.ccwd)")
         return edge.ccwd
     elseif f == edge.fl
@@ -800,9 +811,9 @@ function ccwface(f::Face, edge::Union{Edge,Nothing}=nothing)::Edge
     if isnothing(edge)
         return f.edge
     end
-    if edge.fr == edge.fl
-        return edge.cwo != edge ? edge.cwo : edge.cwd
-    elseif f == edge.fr
+    # if edge.fr == edge.fl
+    #     return edge.cwo != edge ? edge.cwo : edge.cwd
+    if f == edge.fr
         return edge.cwo
     elseif f == edge.fl
         return edge.cwd
@@ -923,8 +934,13 @@ end
 
 
 function findinfiniteface(D::DCEL)::Face
-	index = findfirst(x->isnothing(getfield(x, :site)), D.facelist)
-	return D.facelist[index]
+    # index = findfirst(x->isnothing(getfield(x, :site)), D.facelist)
+    for face in D.facelist #TODO: compare
+        if !face.dead && isnothing(face.site)
+            return face
+        end
+    end
+	return
 end
 
 
@@ -940,7 +956,7 @@ function deleteedge!(D::DCEL, e::Edge, merge_faces::Bool=true)::Nothing
     cwset!(e.ccwo, e.orig, e.cwo)
     ccwset!(e.cwd, e.dest, e.ccwd)
     cwset!(e.ccwd, e.dest, e.cwd)
-    filter!(x->x != e, D.edgelist)
+    fooedge(D, e)
     return
 end
 
@@ -959,7 +975,7 @@ end
 
 function resetfacelist!(D::DCEL, face::Face, new_face::Face)::Nothing
     resetface(face, new_face)
-    filter!(x->x !=face, D.facelist)
+    fooface(D, face)
     return
 end
 
@@ -1229,60 +1245,22 @@ function bisector(f1::Face, f2::Face)::DCEL
 end
 
 
-# function edgerayintersection(edge::Edge, q::Array, angle::Float64, infinite::Bool=false; io=stdout)::Array
-#     p = edge.orig.pos
-#     r = edge.dest.pos - p
-#     s = [cos(angle), sin(angle)]
-#     num = q - p
-#     den = cross2d(r, s)
-#     t = cross2d(num, s)/den
-#     u = cross2d(num, r)/den
-# 	cond = isstrut(edge) ? 0<=t : 0<=t<=1
-# 	return (u>=0 || infinite) && cond ? p+t*r : [NaN,NaN]
-# end
-
-
-# function facerayintersection(f::Face, start::Array, angle::Number, edge::Edge;
-# 	dir::Symbol=:ccw, infinite::Bool=false, ignore::Array=[], io=stdout)::Tuple
-# 	start_vertices = endpoints(edge)
-# 	start_edge = edge
-# 	counter = 0
-#     #writenothing(io, "CHECKING INTERSECTION OF FACE $(f) WITH IGNORE $(getfield.(ignore, :id))\n")
-#     while true
-#         #writenothing(io, "CHECKING EDGE $(edge.id) ($(edge.orig.pos), $(edge.dest.pos))\n")
-#         if !edge.dead && !isframe(edge) && !(edge in ignore)
-#             inter = edgerayintersection(edge, start, angle, infinite, io=io)
-# 			#writenothing(io, "INTERSECTION: $inter\n")
-#             if !isnan(inter[1])
-#                 #writenothing(io, "INTERSECTED $(edge.id) ($(edge.orig.pos), $(edge.dest.pos)), AT $inter\n")
-#                 return edge, inter
-#             end
-#         end
-#         next_edge = nextedge(f, dir, edge)
-# 		if counter >= 2 && !isnothing(commonvertex(edge, start_edge))
-# 	        return nothing, [NaN, NaN]
-# 		end
-
-#         edge = next_edge
-# 		counter += 1
-#     end
-#     return
-# end
-
-
 function edgerayintersection(edge::Edge, q::Array, vector::Array, infinite::Bool=false; io=stdout)::Array
     p = edge.orig.pos
     r = edge.dest.pos - p
     num = q - p
     den = cross2d(r, vector)
     t = cross2d(num, vector)/den
-    u = cross2d(num, r)/den
-	cond = isstrut(edge) ? 0<=t : 0<=t<=1
-	return (u>=0 || infinite) && cond ? p+t*r : [NaN,NaN]
+    if (cross2d(num, r)/den>=0 || infinite) && (isstrut(edge) ? 0<=t : 0<=t<=1)
+        return p+t*r
+    else
+        return [NaN, NaN]
+    end
+    return
 end
 
 
-function facerayintersection(f::Face, start::Array, vector::Array, edge::Edge;
+function facerayintersection(f::Face, start::Array, vector::Array, edge::Edge;  
 	dir::Symbol=:ccw, infinite::Bool=false, ignore::Array=[], io=stdout)::Tuple
 	start_vertices = endpoints(edge)
 	start_edge = edge
@@ -1350,65 +1328,56 @@ end
 #---
 function findedge(v::Vertex, f::Face, side::Symbol)::Edge
 	edge = v.edge
-	while edge.fr != f && edge.fl != f
+    while edge.fr != f && edge.fl != f
 		edge = nextpivot(edge, v, side)
-	end
+    end
 	return edge
 end
 
 
 function highestintersection(D::DCEL, handler::Handler; io=stdout)::Tuple
 	infinite = isnothing(handler.current_vertex)
-	if infinite
+    if infinite
         start = midpoint(handler.left_face, handler.right_face)
 		left_starter_edge = handler.left_face.edge
 		right_starter_edge = handler.right_face.edge
     else
         start = handler.current_vertex.pos
-		left_starter_edge = findedge(handler.left_vertex, handler.left_face, :ccw)
-		right_starter_edge = findedge(handler.right_vertex, handler.right_face, :cw)
+        left_starter_edge = findedge(handler.left_vertex, handler.left_face, :ccw)
+        # left_starter_edge = handler.current_joint
+        right_starter_edge = findedge(handler.right_vertex, handler.right_face, :cw)
     end
-    # angle = perpangle(handler.right_face, handler.left_face)
     perp_vector = perpvector(handler.right_face, handler.left_face)
 	#writenothing(io, "\nCHECKING INTERSECTION OF DIAGRAMS WITH RAY\nSTART: $start\nANGLE: $(rad2deg(angle))\nIGNORE: $(handler.ignore)\n")
     #writenothing(io, "\nCHECKING LEFT DIAGRAM...\n")
     el, il = facerayintersection(handler.left_face, start, perp_vector, left_starter_edge, dir=:ccw, infinite=infinite, ignore=handler.ignore, io=io)
     #writenothing(io, "\nCHECKING RIGHT DIAGRAM...\n")
     er, ir = facerayintersection(handler.right_face, start, perp_vector, right_starter_edge, dir=:cw, infinite=infinite, ignore=handler.ignore, io=io)
-    dr = distance(start, ir)
-    dl = distance(start, il)
-    s = nothing
-    if all(isnan.(il)) || ir[2]>il[2]
-        starter_right = :right
+    if isnothing(el) || ir[2] > il[2]
         split = createvertex!(D, ir)
 		#writenothing(io, "\n++INTERSECTED RIGHT DIAGRAM FIRST AT v$(split.id) $(ir)++\n")
-        s = splitedge!(D, er, split)
-    elseif all(isnan.(ir)) || il[2]>ir[2]
-        starter_right = :left
+        return true, split, splitedge!(D, er, split)
+    elseif isnothing(er) || il[2] > ir[2]
         split = createvertex!(D, il)
 		#writenothing(io, "\n++INTERSECTED LEFT DIAGRAM FIRST AT v$(split.id) $(il)++\n")
-        s = splitedge!(D, el, split)
+        return false, split, splitedge!(D, el, split)
     else #sanity
         throw("")
     end
-    return starter_right, split, s
 end
 
 
-function killface!(face::Face, edge::Edge, dir::Symbol, stop_vertex::Union{Vertex}; io=stdout)::Nothing
+function killface!(face::Face, edge::Edge, dir::Symbol, stop_vertex::Vertex; io=stdout)::Nothing
     #writenothing(io, "KILLING FACE: $face\n")
     while true
-        next_edge = dir==:cw ? cwface(face, edge) : ccwface(face, edge)
+        next_edge = nextedge(face, dir, edge)
         edge.dead = true
 		#writenothing(io, "KILLED EDGE: e$(edge.id) ($(edge.orig.pos), $(edge.dest.pos))\n")
         v = commonvertex(edge, next_edge)
         if stop_vertex in endpoints(edge)
-			#writenothing(io, "STOPPED AT: $stop_vertex\n")
+            #writenothing(io, "STOPPED AT: $stop_vertex\n")
             return
         end
-		if isnothing(v)
-			throw("$edge, $next_edge don't have a common vertex!")
-		end
         v.dead = true
 		#writenothing(io, "KILLED VERTEX: $v\n")
         edge = next_edge
@@ -1418,53 +1387,22 @@ function killface!(face::Face, edge::Edge, dir::Symbol, stop_vertex::Union{Verte
 end
 
 
-function updatehandler!(handler::Handler, edge::Edge, new_vertex::Vertex, side::Symbol,
-	stop_left::Vertex, stop_right::Vertex; io=stdout)::Nothing
-    if side == :right
-        killface!(handler.right_face, edge, :cw, stop_right, io=io)
+function updatehandler!(handler::Handler, edge::Edge, new_vertex::Vertex, 
+    side::Bool, ignore::Array; io=stdout)::Nothing
+    print(1)
+    if side
         handler.right_face = oppositeface(handler.right_face, edge, io=io)
         handler.right_vertex = new_vertex
-    elseif side == :left
-        killface!(handler.left_face, edge, :ccw, stop_left, io=io)
+    else
         handler.left_face = oppositeface(handler.left_face, edge, io=io)
         handler.left_vertex = new_vertex
-    else
-        throw("")
     end
     handler.current_vertex = new_vertex
-    handler.side = side
     handler.current_joint = new_vertex.edge
+    handler.rightside = side
+    handler.ignore = ignore
     return
 end
-
-
-function foobar(D::DCEL, handler::Handler;
-	stop_left::Union{Vertex,Nothing} = handler.left_vertex,
-	stop_right::Union{Vertex,Nothing} = handler.right_vertex, io=stdout)::Nothing
-	right_first, split, s = highestintersection(D, handler, io=io)
-    joint = joinvertices!(D, handler.current_vertex, split, split_face=false, update_edges=false)
-	split.edge = joint
-    settopology!(joint, fr=handler.left_face, fl=handler.right_face)
-	#writenothing(io, "CREATED VERTEX v$(split.id)\n")
-    #writenothing(io, "CREATED JOINT $(joint.id): ($(joint.orig.pos), $(joint.dest.pos))\n")
-    if right_first == :right
-        handler.right_face.edge = joint
-    elseif right_first == :left
-        handler.left_face.edge = joint
-    end
-    edge = getfield(joint, right_first==:right ? :ccwd : :cwd)
-	if handler.side == :right
-        joint.cwo = handler.current_joint
-        ccwset!(handler.current_joint, handler.current_vertex, joint)
-    else
-        joint.ccwo = handler.current_joint
-        cwset!(handler.current_joint, handler.current_vertex, joint)
-    end
-    updatehandler!(handler, edge, split, right_first, stop_left, stop_right, io=io)
-    handler.ignore = s
-    return
-end
-
 
 function openface(f::Face, dir::Symbol; io=stdout)::Tuple
     e = findframe(f)
@@ -1481,7 +1419,7 @@ end
 
 
 function updateray!(D::DCEL, ray::Edge, u::Vertex, left::Face, right::Face)::Nothing
-	v = createdummyvertex!(D, u, perpangle(left,right))
+	v = createdummyvertex!(D, u, perpangle(left, right))
 	replacevertex!(ray.dest, v)
 	settopology!(ray, orig=u, fl=left, fr=right)
 	squeezeedge!(u, ray, false)
@@ -1491,7 +1429,7 @@ function updateray!(D::DCEL, ray::Edge, u::Vertex, left::Face, right::Face)::Not
 end
 
 
-function weldboundary(D::DCEL, t::Tuple, ray::Edge, side::Symbol; io=stdout)::Nothing
+function weldboundary(D::DCEL, t::Tuple, ray::Edge, side::Bool; io=stdout)::Nothing
 	#writenothing(io, "WELDING $(t[1]) to $ray\n")
 	v = ray.dest
 	getfield(t[1], t[2]).dead = true
@@ -1500,7 +1438,7 @@ function weldboundary(D::DCEL, t::Tuple, ray::Edge, side::Symbol; io=stdout)::No
 	if ray.ccwd == ray
 		squeezeedge!(v, t[1], false, previous=ray, next=ray)
 	else
-		if side == :right
+		if side
 			squeezeedge!(v, t[1], false, previous=ray, next=ray.ccwd)
 		else
 			squeezeedge!(v, t[1], false, previous=ray.ccwd, next=ray)
@@ -1545,5 +1483,138 @@ function cleardcel!(D::DCEL)::Nothing
 	D.facelist = []
 	return
 end
+
+
+##---
+function mergevoronoi(left::DCEL, right::DCEL, io)
+    fi = mergeinfinitefaces!(left, right)
+    D = joindcel(left, right)
+    push!(D.facelist, fi)
+    hl, hr, ll, lr = findextrema(left, right, fi)
+    # writenothing(io, "TOP FACES: ($hl, $hr)\n")
+    # writenothing(io, "BOT FACES: ($ll, $lr)\n")
+
+    tl, tr, bl, br = openface.([hl, hr, ll, lr], [:ccw, :cw, :cw, :ccw], io=io)
+    starter_left = getfield(tl[1], tl[2])
+    starter_right = getfield(tr[1], tr[2])
+    top_ray = createfloatingedge!(D)
+    bot_ray = createfloatingedge!(D) #comment out if you cannot print the edgelist
+
+    handler = Handler(hl, hr, starter_left, starter_right)
+    right_first, split, s = highestintersection(D, handler, io=io)
+    if right_first
+        edge = cwface(hr, s[1]) == s[2] ? s[2] : s[1]
+        killface!(handler.right_face, edge, :cw, starter_right, io=io)
+        weldboundary(D, tr, top_ray, true, io=io)
+    else
+        edge = ccwface(hl, s[1]) == s[2] ? s[2] : s[1]
+        killface!(handler.left_face, edge, :ccw, starter_left, io=io)
+        weldboundary(D, tl, top_ray, false, io=io)
+    end
+    updateray!(D, top_ray, split, hl, hr)
+    updatehandler!(handler, edge, split, right_first, s, io=io)
+    handler.current_joint = top_ray
+
+    while handler.left_face != ll || handler.right_face != lr
+        right_first, split, s = highestintersection(D, handler, io=io)
+        joint = joinvertices!(D, handler.current_vertex, split, split_face=false, update_edges=false)
+        split.edge = joint
+        settopology!(joint, fr=handler.left_face, fl=handler.right_face)
+        #writenothing(io, "CREATED VERTEX v$(split.id)\n")
+        #writenothing(io, "CREATED JOINT $(joint.id): ($(joint.orig.pos), $(joint.dest.pos))\n")
+        if right_first
+            edge = joint.ccwd
+            handler.right_face.edge = joint
+            killface!(handler.right_face, edge, :cw, handler.right_vertex, io=io)
+        else
+            edge = joint.cwd
+            handler.left_face.edge = joint
+            killface!(handler.left_face, edge, :ccw, handler.left_vertex, io=io)
+        end
+        if handler.rightside
+            settopology!(joint, cwo=handler.current_joint)
+            ccwset!(handler.current_joint, handler.current_vertex, joint)
+        else
+            settopology!(joint, ccwo=handler.current_joint)
+            cwset!(handler.current_joint, handler.current_vertex, joint)
+        end
+        
+        if right_first && handler.right_face == hr #This also works for the degenerate case!
+            weldboundary(D, tr, top_ray, true, io=io)
+        elseif !right_first && handler.left_face == hl 
+            weldboundary(D, tl, top_ray, false, io=io)
+        end
+        
+        updatehandler!(handler, edge, split, right_first, s, io=io)
+    end
+    weldboundary(D, bl, bot_ray, true, io=io)
+    updateray!(D, bot_ray, handler.current_vertex, lr, ll)
+    weldboundary(D, br, bot_ray, false, io=io)
+    if handler.rightside
+        squeezeedge!(handler.current_vertex, bot_ray, false, next=handler.current_joint.cwd, previous=handler.current_joint)
+    else
+        squeezeedge!(handler.current_vertex, bot_ray, false, previous=handler.current_joint.ccwd, next=handler.current_joint)
+    end
+
+    fi.edge = tl[1]
+    hl.edge = tl[1]
+    hr.edge = tr[1]
+    ll.edge = bl[1]
+    lr.edge = br[1]
+
+    return D
+end
+
+
+function voronoi(points::Array, io)
+    if length(points) == 2
+        return voronoitwopoints(points)
+    elseif length(points) == 3
+        return voronoithreepoints(points)
+    else
+        split = Int(floor(length(points)/2))
+        points_left = points[1:split]
+        points_right = points[split+1:end]
+        vor_left = voronoi(points_left, io)
+        vor_right = voronoi(points_right, io)
+        vor = mergevoronoi(vor_left, vor_right, io)
+
+        filter!(x->!getfield(x, :dead), vor.edgelist) #TODO: Is this faster than filtering every deletion?
+        filter!(x->!getfield(x, :dead), vor.vertexlist)
+        filter!(x->!getfield(x, :dead), vor.facelist)    
+        return vor
+    end
+    return
+end
+
+
+function voronoihelper(points::Array; io=stdout)
+    points = sort(points, by=x->x[1])
+    out = voronoi(points, io)
+    fixids!(out)
+    return out
+end
+
+
+@inline function fooedge(D::DCEL, e::Edge)::Nothing
+    e.dead = true
+    # filter!(x->x != e, D.edgelist)
+    return
+end
+
+
+@inline function fooface(D::DCEL, e::Face)::Nothing
+    e.dead = true
+    # filter!(x->x != e, D.facelist)
+    return
+end
+
+
+@inline function foovertex(D::DCEL, e::Vertex)::Nothing
+    e.dead = true
+    # filter!(x->x != e, D.vertexlist)
+    return
+end
+
 
 end
