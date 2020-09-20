@@ -38,6 +38,12 @@ averagepositions, sorted_ccw, uncommonvertices,
 voronoihelper
 
 #---
+global TOTAL_EDGES = 0
+global TOTAL_FACES = 0
+global TOTAL_VERTICES = 0
+
+#--
+
 #Struct
 mutable struct Vertex
     id::String
@@ -92,10 +98,9 @@ mutable struct Handler
     right_vertex::Union{Vertex,Nothing}
     current_vertex::Union{Vertex,Nothing}
     current_joint::Union{Edge,Nothing}
-    rightside::Bool
     ignore::Array
 end
-Handler(lf::Face, rf::Face, lv::Vertex, rv::Vertex)::Handler = Handler(lf, rf, lv, rv, nothing, nothing, true, [])
+Handler(lf::Face, rf::Face, lv::Vertex, rv::Vertex)::Handler = Handler(lf, rf, lv, rv, nothing, nothing, [])
 
 
 
@@ -267,14 +272,18 @@ end
 
 #---
 function createvertex!(D::DCEL, pos::Array, original::Bool=true)::Vertex
-     new_vertex = Vertex("$(length(D.vertexlist)+1)", pos, nothing, original)
+    global TOTAL_VERTICES
+    TOTAL_VERTICES += 1
+    new_vertex = Vertex(string(TOTAL_VERTICES), pos, nothing, original)
     push!(D.vertexlist, new_vertex)
     return new_vertex
 end
 
 
 function createedge!(D::DCEL, u::Vertex, v::Vertex)::Edge
-    new_edge = Edge("$(length(D.edgelist)+1)", u, v)
+    global TOTAL_EDGES
+    TOTAL_EDGES += 1
+    new_edge = Edge(string(TOTAL_EDGES), u, v)
     settopology!(new_edge)
     push!(D.edgelist, new_edge)
     return new_edge
@@ -291,7 +300,9 @@ end
 
 
 function createface!(D::DCEL)::Face
-    new_face = Face("$(length(D.facelist)+1)")
+    global TOTAL_FACES
+    TOTAL_FACES += 1
+    new_face = Face(string(TOTAL_FACES))
     push!(D.facelist, new_face)
     return new_face
 end
@@ -743,8 +754,9 @@ function joinvertices!(D::DCEL, u::Vertex, v::Vertex; po::Union{Edge,Nothing}=no
     end
 
     if split_face
+        global TOTAL_FACES
         f = new_edge.fr
-        f1 = Face("$(length(D.facelist)+1)", new_edge)
+        f1 = Face(string(TOTAL_FACES+1), new_edge)
         current_vertex = new_edge.orig
         current_edge = ccw(new_edge, current_vertex)
         while current_edge != new_edge
@@ -758,7 +770,7 @@ function joinvertices!(D::DCEL, u::Vertex, v::Vertex; po::Union{Edge,Nothing}=no
             current_edge = ccw(current_edge, current_vertex)
         end
 
-        f2 = Face("$(length(D.facelist)+2)", new_edge)
+        f2 = Face(string(TOTAL_FACES+2), new_edge)
         current_vertex = new_edge.dest
         current_edge = ccw(new_edge, current_vertex)
         while current_edge != new_edge
@@ -783,6 +795,7 @@ function joinvertices!(D::DCEL, u::Vertex, v::Vertex; po::Union{Edge,Nothing}=no
             fooface(D, f)
         end
         push!(D.facelist, f1, f2)
+        TOTAL_FACES += 2
     end
     return new_edge
 end
@@ -946,7 +959,9 @@ end
 
 function deleteedge!(D::DCEL, e::Edge, merge_faces::Bool=true)::Nothing
     if merge_faces
-        f = Face("$(length(D.facelist))")
+        global TOTAL_FACES
+        TOTAL_FACES -= 1
+        f = Face(string(TOTAL_FACES))
         f.edge = e.ccwo
         resetfacelist!(D, f, e.fl)
         resetfacelist!(D, f, e.fr)
@@ -1389,7 +1404,6 @@ end
 
 function updatehandler!(handler::Handler, edge::Edge, new_vertex::Vertex, 
     side::Bool, ignore::Array; io=stdout)::Nothing
-    print(1)
     if side
         handler.right_face = oppositeface(handler.right_face, edge, io=io)
         handler.right_vertex = new_vertex
@@ -1399,7 +1413,6 @@ function updatehandler!(handler::Handler, edge::Edge, new_vertex::Vertex,
     end
     handler.current_vertex = new_vertex
     handler.current_joint = new_vertex.edge
-    handler.rightside = side
     handler.ignore = ignore
     return
 end
@@ -1531,7 +1544,7 @@ function mergevoronoi(left::DCEL, right::DCEL, io)
             handler.left_face.edge = joint
             killface!(handler.left_face, edge, :ccw, handler.left_vertex, io=io)
         end
-        if handler.rightside
+        if handler.current_vertex == handler.right_vertex
             settopology!(joint, cwo=handler.current_joint)
             ccwset!(handler.current_joint, handler.current_vertex, joint)
         else
@@ -1550,7 +1563,7 @@ function mergevoronoi(left::DCEL, right::DCEL, io)
     weldboundary(D, bl, bot_ray, true, io=io)
     updateray!(D, bot_ray, handler.current_vertex, lr, ll)
     weldboundary(D, br, bot_ray, false, io=io)
-    if handler.rightside
+    if handler.current_vertex == handler.right_vertex
         squeezeedge!(handler.current_vertex, bot_ray, false, next=handler.current_joint.cwd, previous=handler.current_joint)
     else
         squeezeedge!(handler.current_vertex, bot_ray, false, previous=handler.current_joint.ccwd, next=handler.current_joint)

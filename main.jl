@@ -8,13 +8,13 @@ using Profile, PProf, BenchmarkTools
 
 ##---
 file = open("log.txt", "w")
-points = [rand(2) for i in 1:1000]
+points = [rand(2) for i in 1:10000]
 dumpoints = [[1,1], [3,5], [0,2]]
 
 ##---
 voronoihelper(dumpoints, io=file)
 Profile.clear()
-@time test = voronoihelper(points, io=file)
+@profile test = voronoihelper(points, io=file)
 close(file)
 # fixids!(test)
 # checkdcel(test, io=nothing)
