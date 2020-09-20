@@ -3,38 +3,6 @@ import Base.show
 using Plots, Statistics
 export DCEL, Vertex, Edge, Face, Handler,
 
-createvertex!, createdummyvertex!, splitedge!, addray!, joinvertices!, createfloatingedge!,#Constructors
-
-squeezeedge!, settopology!, cwset!, ccwset!, #Topology
-
-ccw, cw, ccwface, cwface, nextedge, #Face and edge traversal
-
-faceedges, faceverticescw, faceverticesccw, vertexedges,#
-
-mergeinfinitefaces!, joindcel, #
-
-fixids!,
-
-checkedge, checkdcel,
-
-plotdcel,
-
-facerayintersection,
-
-midpoint, bisectorangles, distance,
-
-findextrema, findstruts, findsupport, leftofline, findframe,
-
-findside, getframesite,
-
-perpangle, isframe, commonvertex, oppositeface, endpoints, unstickedge!,
-
-voronoitwopoints, voronoithreepoints, #Elementary diagrams
-
-openface, highestintersection, updatehandler!, weldboundary, updateray!, writenothing, cleardcel!,
-
-averagepositions, sorted_ccw, uncommonvertices,
-
 voronoihelper
 
 #---

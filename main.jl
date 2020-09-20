@@ -14,7 +14,7 @@ dumpoints = [[1,1], [3,5], [0,2]]
 ##---
 voronoihelper(dumpoints, io=file)
 Profile.clear()
-@profile test = voronoihelper(points, io=file)
+@time test = voronoihelper(points, io=file)
 close(file)
 # fixids!(test)
 # checkdcel(test, io=nothing)
