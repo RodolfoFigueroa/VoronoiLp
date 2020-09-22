@@ -74,8 +74,13 @@ Handler(lf::Face, rf::Face, lv::Vertex, rv::Vertex)::Handler = Handler(lf, rf, l
 
 #---
 #Printing
-function printnothing(e::Any)::String
-    p = String
+"""
+    printnothing(x)
+
+Print "e", "f" or "v" if `x` is an edge, vertex or face, respectively, alongside its id.
+If `x` is nothing, print "nothing".
+"""
+function printnothing(e::Union{Edge,Face,Vertex})::String
     if e isa Edge
         p = "e"
     elseif e isa Face
@@ -136,16 +141,31 @@ end
 
 #---
 #Geometry
+"""
+    cross2d(u, v)
+
+Compute the 2-dimensional cross product u₁v₂-u₂v₁.
+"""
 @inline function cross2d(u::T, v::T) where T<:Union{Tuple, Array}
     return u[1]*v[2] - u[2]*v[1]
 end
 
 
+"""
+    dot(u, v)
+
+Compute the 2-dimensional dot product u₁v₁+u₂v₂.
+"""
 @inline function dot(u::Array, v::Array)::Float64
     return u[1]*v[1] + u[2]*v[2]
 end
 
 
+"""
+    norm(x)
+
+
+"""
 @inline function norm(a::Array)::Float64
     return hypot(a...)
 end
@@ -161,11 +181,22 @@ end
 end
 
 
+"""
+    cosatan(y, x)
+
+Compute `cos(atan(y, x))`.
+
+"""
 @inline function cosatan(y::Number, x::Number)::Float64
     return x/hypot(x,y)
 end
 
 
+"""
+    sinatan(y, x)
+
+Compute `sin(atan(y, x))`.
+"""
 function sinatan(y::Number, x::Number)::Float64
     if x==0
         if y>0
@@ -182,6 +213,11 @@ function sinatan(y::Number, x::Number)::Float64
 end
 
 
+"""
+    pointccw(x)
+
+Tell whether the points in `x` are sorted counterclockwise.
+"""
 function pointccw(array::Array)::Bool
     sum = 0
     for i in 2:length(array)
@@ -192,28 +228,16 @@ function pointccw(array::Array)::Bool
 end
 
 
-function midpoints(u::Array, v::Array, w::Array)::Tuple
-    return mean([u,v]), mean([v,w]), mean([w,u])
-end
-
-
 function angleccw(a::Number, b::Number, c::Number)::Bool
     return sin(a-b) + sin(b-c) + sin(c-a)  <= 0
 end
 
 
-function circletwopointsradius(p::Array, q::Array, r::Number)
-    x1, y1 = p
-    x2, y2 = q
-	q = hypot(x2-x1, y2-y1)
-    y3 = (y1+y2)/2
-    x3 = (x1+x2)/2
-    basex = sqrt(r^2 - (q/2)^2) * (y1-y2)/q
-    basey = sqrt(r^2 - (q/2)^2) * (x2-x1)/q
-    return [x3+basex, y3+basey], [x3-basex, y3-basey]
-end
+"""
+    circlethreepoints(x, y, z)
 
-
+Return the center of the circle passing through the points `x`, `y` and `z`.
+"""
 function circlethreepoints(p::Array, q::Array, r::Array)::Array
     x1,y1 = p
     x2,y2 = q
@@ -237,8 +261,36 @@ function l2(x::Array, y::Array)::Float64
 end
 
 
+#---
+"""
+    settopology(e)
+
+"""
+function settopology!(e::Edge; orig::Union{Vertex,Nothing}=nothing,
+	dest::Union{Vertex,Nothing}=nothing, cwo::Union{Edge,Nothing}=nothing,
+    ccwo::Union{Edge,Nothing}=nothing, cwd::Union{Edge,Nothing}=nothing,
+    ccwd::Union{Edge,Nothing}=nothing, fr::Union{Face,Nothing}=nothing,
+    fl::Union{Face,Nothing}=nothing)::Nothing
+	if !isnothing(orig) e.orig = orig end
+	if !isnothing(dest) e.dest = dest end
+	if !isnothing(cwo) e.cwo = cwo end
+    if !isnothing(ccwo) e.ccwo = ccwo end
+    if !isnothing(cwd) e.cwd = cwd end
+    if !isnothing(ccwd) e.ccwd = ccwd end
+    if !isnothing(fr) e.fr = fr end
+    if !isnothing(fl) e.fl = fl end
+    return
+end
+settopology!(e::Edge)::Nothing = settopology!(e, cwo=e, ccwo=e, cwd=e, ccwd=e)
+
+
 
 #---
+"""
+    createvertex!(D, pos, orig=true)
+
+Create a vertex with position `pos` and original flag `orig` and add it to the DCEL `D`.
+"""
 function createvertex!(D::DCEL, pos::Array, original::Bool=true)::Vertex
     global TOTAL_VERTICES
     TOTAL_VERTICES += 1
@@ -248,6 +300,11 @@ function createvertex!(D::DCEL, pos::Array, original::Bool=true)::Vertex
 end
 
 
+"""
+    createedge!(D, p, q)
+
+Create an edge with origin `p` and destination `q` and add it to the DCEL `D`.
+"""
 function createedge!(D::DCEL, u::Vertex, v::Vertex)::Edge
     global TOTAL_EDGES
     TOTAL_EDGES += 1
@@ -258,24 +315,162 @@ function createedge!(D::DCEL, u::Vertex, v::Vertex)::Edge
 end
 
 
+"""
+    squeezeedge(v, e; <keyword_arguments>)
+
+Update all the edges incident to `v` so that they are properly sorted around edge `e`.
+
+`e` must have `v` as one of its endpoints. Checking if the edges are sorted correctly
+can be skipped if a previous/next edge is provided via keyword arguments.
+
+# Arguments
+- `v::Vertex` : The vertex around which to sort.
+- `e::Edge` : The edge to consider when sorting.
+- `update_faces::Bool=true`: Whether to automatically update `e.fl` and `e.fr` with the proper faces.
+- `previous::Edge`: The edge that will be clockwise to `e` around `v`.
+- `next::Edge`: The edge that will be counterclockwise to `e` around `v`.
+"""
+function squeezeedge!(v::Vertex, e::Edge; update_faces::Bool=true,
+	previous::Union{Edge,Nothing}=nothing, next::Union{Edge,Nothing}=nothing)::Nothing
+	# @assert v in endpoints(e)
+    if isnothing(v.edge)
+        return
+    end
+    previous_set = next_set = true
+    if isnothing(previous) && isnothing(next)
+        previous_set = next_set = false
+        previous = v.edge
+    elseif isnothing(previous)
+        previous_set = false
+        previous = cw(next, v)
+    elseif isnothing(next)
+        next_set = false
+    end
+    while true
+        if !next_set
+            next = ccw(previous, v)
+        end
+        if previous_set || next_set || sorted_ccw(previous, e, next)
+			fr = fl = nothing
+			if update_faces
+	            fr = v==previous.orig ? previous.fl : previous.fr
+	            fl = v==next.orig ? next.fr : next.fl
+			end
+            if v == e.orig
+                settopology!(e, cwo=previous, ccwo=next, fr=fr, fl=fl)
+            else
+                settopology!(e, cwd=previous, ccwd=next, fr=fl, fl=fr)
+            end
+            cwset!(next, v, e)
+            ccwset!(previous, v, e)
+            return
+        end
+        previous = next
+    end
+    return
+end
+
+
+"""
+    joinvertices!(D, p, q; <keyword_arguments>)
+
+Join the vertices `p` and `q`, add the resulting edge and faces to `D` and update the topology.
+
+# Arguments
+- `D::DCEL`: The DCEL that contains `p` and `q`.
+- `p::Vertex`: The origin vertex to join.
+- `q::Vertex`: The destination vertex to join.
+- `previous_orig::Edge`: Edge that will be clockwise to the new edge around `p`.
+- `next_orig::Edge`: Edge that will be counterclockwise to the new edge around `p`.
+- `previous_dest::Edge`: Edge that will be clockwise to the new edge around `q`.
+- `next_dest::Edge`: Edge that will be counterclockwise to the new edge around `q`.
+- `split_face::Bool`: Whether to split the face that contains the new edge in two new faces.
+- `update_edges::Bool`: Whether to update the vertices so that their assigned edge is the newly created edge.
+"""
+function joinvertices!(D::DCEL, u::Vertex, v::Vertex; previous_orig::Union{Edge,Nothing}=nothing, 
+    previous_dest::Union{Edge,Nothing}=nothing, next_orig::Union{Edge,Nothing}=nothing, 
+    next_dest::Union{Edge,Nothing}=nothing, split_face::Bool=true, update_edges::Bool=true)
+    
+    @assert u != v "Cannot join a vertex to itself"
+    
+    new_edge = createedge!(D, u, v)
+    squeezeedge!(u, new_edge, previous=previous_orig, next=next_orig)
+    squeezeedge!(v, new_edge, previous=previous_dest, next=next_dest)
+    disconnected = isnothing(u.edge) || isnothing(v.edge)
+	if update_edges
+    	u.edge = v.edge = new_edge
+	end
+    if disconnected
+        return new_edge
+    end
+
+    if split_face
+        global TOTAL_FACES
+        f = new_edge.fr
+        f1 = Face(string(TOTAL_FACES+1), new_edge)
+        current_vertex = new_edge.orig
+        current_edge = ccw(new_edge, current_vertex)
+        while current_edge != new_edge
+            if current_vertex == current_edge.orig
+                current_edge.fr = f1
+                current_vertex = current_edge.dest
+            else
+                current_edge.fl = f1
+                current_vertex = current_edge.orig
+            end
+            current_edge = ccw(current_edge, current_vertex)
+        end
+
+        f2 = Face(string(TOTAL_FACES+2), new_edge)
+        current_vertex = new_edge.dest
+        current_edge = ccw(new_edge, current_vertex)
+        while current_edge != new_edge
+            if current_vertex == current_edge.orig
+                current_edge.fr = f2
+                current_vertex = current_edge.dest
+            else
+                current_edge.fl = f2
+                current_vertex = current_edge.orig
+            end
+            current_edge = ccw(current_edge, current_vertex)
+        end
+
+        new_edge.fl = f1
+        new_edge.fr = f2
+
+        if !isnothing(f) && !isnothing(f.site)
+            leftofedge(new_edge, f.site) ? new_edge.fl.site = f.site : new_edge.fr.site = f.site
+        end
+        
+        if !isnothing(f)
+            fooface(D, f)
+        end
+        push!(D.facelist, f1, f2)
+        TOTAL_FACES += 2
+    end
+    return new_edge
+end
+
+
+"""
+    createfloatingedge(D)
+
+Create an edge with null origin and destination and add it to the DCEL D.
+"""
 function createfloatingedge!(D::DCEL)::Edge
-	u = Vertex("x")
-	v = Vertex("y")
-	e = joinvertices!(D, u, v)
+	e = joinvertices!(D, Vertex(""), Vertex(""))
 	settopology!(e, cwd=e, ccwd=e, cwo=e, ccwo=e)
 	return e
 end
 
 
-function createface!(D::DCEL)::Face
-    global TOTAL_FACES
-    TOTAL_FACES += 1
-    new_face = Face(string(TOTAL_FACES))
-    push!(D.facelist, new_face)
-    return new_face
-end
+"""
+    createdummyvertex!(D, u, angle)
 
+Create a dummy vertex with an angle `angle` with respect to the vertex `u` and add
+it to the DCEL D.
 
+"""
 function createdummyvertex!(D::DCEL, u::Vertex, angle::Number)::Vertex
     vector = u.pos .+ [cos(angle),sin(angle)]
     v = createvertex!(D, vector, false)
@@ -283,6 +478,11 @@ function createdummyvertex!(D::DCEL, u::Vertex, angle::Number)::Vertex
 end
 
 
+"""
+    fixids!(D)
+
+Fix the ids of the vertices, edges and faces of D so that they are sequential.
+"""
 function fixids!(D::DCEL)::Nothing
     for i in 1:length(D.vertexlist)
         D.vertexlist[i].id = "$(i)"
@@ -297,7 +497,12 @@ function fixids!(D::DCEL)::Nothing
 end
 
 
-function averagepositions(D::DCEL)
+"""
+    averagevertexpositions(D)
+
+Return the average of all the vertex positions of D.
+"""
+function averagevertexpositions(D::DCEL)
 	pos = getfield.(D.vertexlist, :pos)
 	mean_pos = mean(pos)
 	dist = [abs.(p - mean_pos) for p in pos]
@@ -306,10 +511,20 @@ function averagepositions(D::DCEL)
 end
 
 
-function plotdcel(D::DCEL; faces::Bool=false, dead_edges::Bool=false,
-				  dead_vertices::Bool=false, bounds::Bool=true, sites::Bool=false,
-				  normalize::Bool=true, scale::Number=1, font_size::Int=12,
-				  labels::Bool=true, line::Symbol=:arrow, kwargs...)::Plots.Plot
+"""
+    plotdcel(D; <keyword_arguments>)
+
+Plot the DCEL D. 
+
+# Arguments
+- `faces::Bool`: 
+
+Additionaly, 
+"""
+function plotdcel(D::DCEL; dead_edges::Bool=false, dead_vertices::Bool=false, 
+                bounds::Bool=true, sites::Bool=false, normalize::Bool=true, 
+                scale::Number=1, font_size::Int=12, 
+                labels::Bool=true, line::Symbol=:arrow, kwargs...)::Plots.Plot
 
 	avg_pos, avg_dist = averagepositions(D)
 	xlims = avg_pos[1] .+ [-1, 1] .*avg_dist
@@ -552,9 +767,9 @@ end
 
 function sorted_ccw(u::Edge, v::Edge, w::Edge)::Bool
     a, b, c, p = getfield.(uncommonvertices(u, v, w), :pos)
-    a = a - p
-    b = b - p
-    c = c - p
+    a -= p
+    b -= p
+    c -= p
     return cross2d(a, b) * sqrt(c[1]^2+c[2]^2) + cross2d(b, c) * sqrt(a[1]^2+a[2]^2) + cross2d(c, a) * sqrt(b[1]^2+b[2]^2) >= 0
 end
 
@@ -562,23 +777,6 @@ end
 # function sorted_ccw(u::Edge, v::Edge, w::Edge)::Bool #TODO: Compare
 #     return sorted_ccw_2(u, v, w)
 # end
-
-function settopology!(e::Edge; orig::Union{Vertex,Nothing}=nothing,
-	dest::Union{Vertex,Nothing}=nothing, cwo::Union{Edge,Nothing}=nothing,
-    ccwo::Union{Edge,Nothing}=nothing, cwd::Union{Edge,Nothing}=nothing,
-    ccwd::Union{Edge,Nothing}=nothing, fr::Union{Face,Nothing}=nothing,
-    fl::Union{Face,Nothing}=nothing)::Nothing
-	if !isnothing(orig) e.orig = orig end
-	if !isnothing(dest) e.dest = dest end
-	if !isnothing(cwo) e.cwo = cwo end
-    if !isnothing(ccwo) e.ccwo = ccwo end
-    if !isnothing(cwd) e.cwd = cwd end
-    if !isnothing(ccwd) e.ccwd = ccwd end
-    if !isnothing(fr) e.fr = fr end
-    if !isnothing(fl) e.fl = fl end
-    return
-end
-settopology!(e::Edge)::Nothing = settopology!(e, cwo=e, ccwo=e, cwd=e, ccwd=e)
 
 
 function getstrut(v::Vertex)::Edge #TODO: add sanity
@@ -630,47 +828,6 @@ function isstrut(e::Edge)::Bool
 end
 
 
-#Magic
-function squeezeedge!(v::Vertex, e::Edge, update_faces::Bool=true;
-	previous::Union{Edge,Nothing}=nothing, next::Union{Edge,Nothing}=nothing)::Nothing
-	# @assert v in endpoints(e)
-    if isnothing(v.edge)
-        return
-    end
-    previous_set = next_set = true
-    if isnothing(previous) && isnothing(next)
-        previous_set = next_set = false
-        previous = v.edge
-    elseif isnothing(previous)
-        previous_set = false
-        previous = cw(next, v)
-    elseif isnothing(next)
-        next_set = false
-    end
-    while true
-        if !next_set
-            next = ccw(previous, v)
-        end
-        if previous_set || next_set || sorted_ccw(previous, e, next)
-			fr = fl = nothing
-			if update_faces
-	            fr = v==previous.orig ? previous.fl : previous.fr
-	            fl = v==next.orig ? next.fr : next.fl
-			end
-            if v == e.orig
-                settopology!(e, cwo=previous, ccwo=next, fr=fr, fl=fl)
-            else
-                settopology!(e, cwd=previous, ccwd=next, fr=fl, fl=fr)
-            end
-            cwset!(next, v, e)
-            ccwset!(previous, v, e)
-            return
-        end
-        previous = next
-    end
-    return
-end
-
 
 function add_join_vertex!(D::DCEL, new::Array, old_vertex::Union{Vertex, Nothing}=nothing)::Vertex
     new_vertex = createvertex!(D, new)
@@ -699,74 +856,6 @@ function endfield(e::Edge, f::Symbol)
     return getfield.(endpoints(e), f)
 end
 
-
-edgelength(e::Edge) = norm(mean(endfield(e, :pos)))::Float64
-
-
-edgemidpoint(e::Edge) = mean(endfield(e, :pos))::Array
-
-
-function joinvertices!(D::DCEL, u::Vertex, v::Vertex; po::Union{Edge,Nothing}=nothing, 
-    pd::Union{Edge,Nothing}=nothing, no::Union{Edge,Nothing}=nothing, 
-    nd::Union{Edge,Nothing}=nothing, split_face::Bool=true, update_edges::Bool=true)
-    @assert u != v "Cannot join a vertex to itself"
-    new_edge = createedge!(D, u, v)
-    squeezeedge!(u, new_edge, previous=po, next=no)
-    squeezeedge!(v, new_edge, previous=pd, next=nd)
-    disconnected = isnothing(u.edge) || isnothing(v.edge)
-	if update_edges
-    	u.edge = v.edge = new_edge
-	end
-    if disconnected
-        return new_edge
-    end
-
-    if split_face
-        global TOTAL_FACES
-        f = new_edge.fr
-        f1 = Face(string(TOTAL_FACES+1), new_edge)
-        current_vertex = new_edge.orig
-        current_edge = ccw(new_edge, current_vertex)
-        while current_edge != new_edge
-            if current_vertex == current_edge.orig
-                current_edge.fr = f1
-                current_vertex = current_edge.dest
-            else
-                current_edge.fl = f1
-                current_vertex = current_edge.orig
-            end
-            current_edge = ccw(current_edge, current_vertex)
-        end
-
-        f2 = Face(string(TOTAL_FACES+2), new_edge)
-        current_vertex = new_edge.dest
-        current_edge = ccw(new_edge, current_vertex)
-        while current_edge != new_edge
-            if current_vertex == current_edge.orig
-                current_edge.fr = f2
-                current_vertex = current_edge.dest
-            else
-                current_edge.fl = f2
-                current_vertex = current_edge.orig
-            end
-            current_edge = ccw(current_edge, current_vertex)
-        end
-
-        new_edge.fl = f1
-        new_edge.fr = f2
-
-        if !isnothing(f) && !isnothing(f.site)
-            leftofedge(new_edge, f.site) ? new_edge.fl.site = f.site : new_edge.fr.site = f.site
-        end
-        
-        if !isnothing(f)
-            fooface(D, f)
-        end
-        push!(D.facelist, f1, f2)
-        TOTAL_FACES += 2
-    end
-    return new_edge
-end
 
 
 function cwface(f::Face, edge::Union{Edge,Nothing}=nothing)::Edge
@@ -984,7 +1073,7 @@ function addray!(D::DCEL, u::Vertex, angle::Number, f::Union{Face,Nothing}=nothi
         new_edge = joinvertices!(D, u, v)
         if !isnothing(v1)
             outer = joinvertices!(D, v1, v)
-            joinvertices!(D, v, v1, po=outer, pd=getstrut(v1))
+            joinvertices!(D, v, v1, previous_orig=outer, previous_dest=getstrut(v1))
         end
     else
         outeredge = nothing
@@ -1001,7 +1090,7 @@ function addray!(D::DCEL, u::Vertex, angle::Number, f::Union{Face,Nothing}=nothi
         end
         e1, e2 = splitedge!(D, outeredge, v)
         previous = ccwface(f, e1) == e2 ? e2 : e1
-        new_edge = joinvertices!(D, u, v, split_face=split_face, pd=previous)
+        new_edge = joinvertices!(D, u, v, split_face=split_face, previous_dest=previous)
     end
     return new_edge
 end
@@ -1235,7 +1324,7 @@ function edgerayintersection(edge::Edge, q::Array, vector::Array, infinite::Bool
     den = cross2d(r, vector)
     t = cross2d(num, vector)/den
     if (cross2d(num, r)/den>=0 || infinite) && (isstrut(edge) ? 0<=t : 0<=t<=1)
-        return p+t*r
+        return p + t*r
     else
         return [NaN, NaN]
     end
@@ -1403,8 +1492,8 @@ function updateray!(D::DCEL, ray::Edge, u::Vertex, left::Face, right::Face)::Not
 	v = createdummyvertex!(D, u, perpangle(left, right))
 	replacevertex!(ray.dest, v)
 	settopology!(ray, orig=u, fl=left, fr=right)
-	squeezeedge!(u, ray, false)
-	squeezeedge!(v, ray, false)
+	squeezeedge!(u, ray, update_faces=false)
+	squeezeedge!(v, ray, update_faces=false)
 	u.edge = v.edge = ray
 	return
 end
@@ -1417,12 +1506,12 @@ function weldboundary(D::DCEL, t::Tuple, ray::Edge, side::Bool; io=stdout)::Noth
 	unstickedge!(t[1], t[2])
 	setfield!(t[1], t[2], v)
 	if ray.ccwd == ray
-		squeezeedge!(v, t[1], false, previous=ray, next=ray)
+		squeezeedge!(v, t[1], update_faces=false, previous=ray, next=ray)
 	else
 		if side
-			squeezeedge!(v, t[1], false, previous=ray, next=ray.ccwd)
+			squeezeedge!(v, t[1], update_faces=false, previous=ray, next=ray.ccwd)
 		else
-			squeezeedge!(v, t[1], false, previous=ray.ccwd, next=ray)
+			squeezeedge!(v, t[1], update_faces=false, previous=ray.ccwd, next=ray)
 		end
 	end
 	return
@@ -1532,9 +1621,9 @@ function mergevoronoi(left::DCEL, right::DCEL, io)
     updateray!(D, bot_ray, handler.current_vertex, lr, ll)
     weldboundary(D, br, bot_ray, false, io=io)
     if handler.current_vertex == handler.right_vertex
-        squeezeedge!(handler.current_vertex, bot_ray, false, next=handler.current_joint.cwd, previous=handler.current_joint)
+        squeezeedge!(handler.current_vertex, bot_ray, update_faces=false, next=handler.current_joint.cwd, previous=handler.current_joint)
     else
-        squeezeedge!(handler.current_vertex, bot_ray, false, previous=handler.current_joint.ccwd, next=handler.current_joint)
+        squeezeedge!(handler.current_vertex, bot_ray, update_faces=false, previous=handler.current_joint.ccwd, next=handler.current_joint)
     end
 
     fi.edge = tl[1]
